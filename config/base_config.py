@@ -136,7 +136,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd","confidence_aware"]
         "none": {},
 
         "entropy_clip": {
@@ -172,6 +172,13 @@ BASE_CONFIG: Dict[str, Any] = {
             "dbscan_min_samples": 2,
             "cosine_keep_ratio": 1.0,
             "fallback": "mean",   # ["mean","median"]
+        },
+        "confidence_aware": {
+            "tau_conf": 0.9,
+            "hist_window": 5,
+            "beta": 2.0,
+            "eps": 1e-12,
+            "lambdas": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         },
     },
 

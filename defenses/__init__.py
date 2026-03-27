@@ -17,6 +17,7 @@ from defenses.defense_mkrum import MKrumDefense
 from defenses.defense_trimean import TriMeanDefense
 from defenses.defense_fedmdr import FedMDRDefense
 from defenses.defense_fedtgd import FedTGDDefense
+from defenses.defense_confidence_aware import ConfidenceAwareDefense
 
 
 def create_defense(
@@ -74,8 +75,6 @@ def create_defense(
             min_clients_kept=min_clients_kept,
         )
 
-    # 未知防御类型，fallback 到最简单的平均
-    return NoDefense(device=device)
     if name == "mkrum":
         cfg = defense_config.get("mkrum", {}) or {}
         return MKrumDefense(
@@ -108,4 +107,16 @@ def create_defense(
             normalize_logits=bool(cfg.get("normalize_logits", True)),
         )
 
+    if name == "confidence_aware":
+        cfg = defense_config.get("confidence_aware", {}) or {}
+        return ConfidenceAwareDefense(
+            device=device,
+            tau_conf=float(cfg.get("tau_conf", 0.9)),
+            hist_window=int(cfg.get("hist_window", 5)),
+            beta=float(cfg.get("beta", 2.0)),
+            eps=float(cfg.get("eps", 1e-12)),
+            lambdas=cfg.get("lambdas", None),
+        )
 
+    # 未知防御类型，fallback 到最简单的平均
+    return NoDefense(device=device)
