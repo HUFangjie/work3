@@ -1,0 +1,1 @@
+/root/miniconda3/bin/python /root/autodl-tmp/t3code/t3_code/main.py --dataset cifar10 --num_rounds 100 --clients_per_round 10 --seed 42 --attack naive_sharpening --attack_enabled --defense mkrum --defense_enabled --exp_config runs/bench/fd_bench_naive_sharpening_none_override.json

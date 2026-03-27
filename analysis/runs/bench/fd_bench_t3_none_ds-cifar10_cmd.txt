@@ -1,0 +1,1 @@
+/root/miniconda3/bin/python /root/autodl-tmp/t3code/t3_code/main.py --dataset cifar10 --num_rounds 100 --clients_per_round 10 --seed 42 --attack t3 --attack_enabled --defense none --defense_disabled

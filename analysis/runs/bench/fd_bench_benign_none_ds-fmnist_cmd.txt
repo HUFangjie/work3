@@ -1,0 +1,1 @@
+D:\anconda\envs\pytorch129\python.exe D:\论文手稿\手稿\论文\3. 模型异构场景下的高置信攻击\t3_code\main.py --dataset fmnist --num_rounds 20 --clients_per_round 10 --seed 42 --attack none --attack_disabled --defense none --defense_disabled

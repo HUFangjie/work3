@@ -1,0 +1,1 @@
+python main.py --dataset fmnist --num_rounds 20 --clients_per_round 10 --seed 42 --attack none --attack_disabled --defense none --defense_disabled --exp_name fd_bench_benign_none_ds-fmnist --log_dir runs/bench

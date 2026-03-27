@@ -1,0 +1,1 @@
+/root/miniconda3/bin/python /root/autodl-tmp/t3code/t3_code/main.py --dataset tiny_imagenet --num_rounds 400 --clients_per_round 10 --seed 42 --attack none --attack_disabled --defense none --defense_disabled
