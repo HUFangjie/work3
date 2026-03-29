@@ -136,7 +136,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd","confidence_aware"]
+        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd","confidence_aware","fedgraphguard"]
         "none": {},
 
         "entropy_clip": {
@@ -179,6 +179,28 @@ BASE_CONFIG: Dict[str, Any] = {
             "beta": 2.0,
             "eps": 1e-12,
             "lambdas": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        "fedgraphguard": {
+            "temperature": 1.0,
+            "topk": 3,
+            "winsor_q": 0.1,
+            "rn": 3,
+            "gnn_layers": 2,
+            "gnn_gamma": 0.5,
+            "lrr_lambda": 0.05,
+            "lrr_gamma": 0.01,
+            "lrr_iters": 40,
+            "lrr_lr": 0.1,
+            "alpha": 0.6,
+            "n_clusters": 2,
+            "tau": 1.0,
+            "phi_min": 0.02,
+            "ppr_beta": 0.85,
+            "ppr_max_iter": 100,
+            "ppr_tol": 1e-6,
+            "trust_threshold": 0.1,
+            "trim_ratio": 0.2,
+            "eps": 1e-12,
         },
     },
 
