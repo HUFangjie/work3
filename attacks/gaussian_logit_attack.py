@@ -41,8 +41,10 @@ class GaussianLogitAttack(BaseAttack):
         self,
         x_public: torch.Tensor,
         logits: torch.Tensor,
+        y_public: Optional[torch.Tensor] = None,
         round_idx: Optional[int] = None,
         global_step: Optional[int] = None,
+        **kwargs: Any,
     ) -> torch.Tensor:
         if not self.is_malicious:
             return logits
