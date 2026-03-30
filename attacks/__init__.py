@@ -59,14 +59,14 @@ def create_attack(
             client_id=client_id,
             model=model,
         )
-    elif name == "label_flip":
+    if name == "label_flip":
         return LabelFlipAttack(
             is_malicious=is_malicious,
             cfg=attack_config,
             client_id=client_id,
             model=model,
         )
-    elif name == "t3":
+    if name == "t3":
         return T3Attack(
             is_malicious=is_malicious,
             cfg=attack_config,
@@ -74,42 +74,54 @@ def create_attack(
             model=model,
             dataset_name=dataset_name,
         )
-
-    elif name == "topk":
+    if name == "topk":
         return TopKLogitAttack(
-        is_malicious=is_malicious,
-        cfg=attack_config,
-        client_id=client_id,
-        model=model,
-    )
-
-    elif name in ("impersonation", "impersonate"):
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    if name in ("impersonation", "impersonate"):
         return ImpersonationAttack(
             is_malicious=is_malicious,
             cfg=attack_config,
             client_id=client_id,
             model=model,
         )
-
-    else:
-        # 未知攻击类型，fallback 到最安全的恒等映射
-        return BaseAttack(
+    if name == "naive_sharpening":
+        return NaiveSharpeningAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    if name == "manipulating_kd":
+        return ManipulatingKDAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    if name == "fed_ace":
+        return FedACEAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    if name == "fed_oca":
+        return FedOCAAttack(
             is_malicious=is_malicious,
             cfg=attack_config,
             client_id=client_id,
             model=model,
         )
 
-    if name == "naive_sharpening":
-        return NaiveSharpeningAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "manipulating_kd":
-        return ManipulatingKDAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "fed_ace":
-        return FedACEAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "fed_oca":
-        return FedOCAAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
+    # 未知攻击类型，fallback 到最安全的恒等映射
+    return BaseAttack(
+        is_malicious=is_malicious,
+        cfg=attack_config,
+        client_id=client_id,
+        model=model,
+    )
 
