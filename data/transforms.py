@@ -17,6 +17,19 @@ def get_fmnist_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
     return train_transform, test_transform
 
 
+def get_mnist_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
+    """Train/test transforms for MNIST (28x28 grayscale)."""
+    train_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,)),
+    ])
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,)),
+    ])
+    return train_transform, test_transform
+
+
 def get_cifar10_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
     """Train/test transforms for CIFAR-10 (32x32 RGB)."""
     train_transform = transforms.Compose([
@@ -83,6 +96,9 @@ def get_pathmnist_transforms(image_size: int = 28) -> Tuple[transforms.Compose, 
 
 def get_train_transform(dataset: str):
     dataset = dataset.lower()
+    if dataset in ["mnist", "minist"]:
+        train_t, _ = get_mnist_transforms()
+        return train_t
     if dataset in ["fmnist", "fashion_mnist"]:
         train_t, _ = get_fmnist_transforms()
         return train_t
@@ -103,6 +119,9 @@ def get_train_transform(dataset: str):
 
 def get_test_transform(dataset: str):
     dataset = dataset.lower()
+    if dataset in ["mnist", "minist"]:
+        _, test_t = get_mnist_transforms()
+        return test_t
     if dataset in ["fmnist", "fashion_mnist"]:
         _, test_t = get_fmnist_transforms()
         return test_t

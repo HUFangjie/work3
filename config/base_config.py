@@ -18,7 +18,7 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Dataset & partitioning
     "data_config": {
-        "dataset": "cifar10",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
+        "dataset": "cifar10",         # ["mnist","fmnist", "cifar10", "tiny_imagenet", ...]
         # "data_root": "./data/MedMNIST",
         "data_root": "./data",
         "num_clients": 10,
