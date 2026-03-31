@@ -166,44 +166,28 @@ def write_exp_override_config(base_log_dir: str, exp_prefix: str, exp: Dict) -> 
 
     Returns the path to the generated JSON file.
     """
+    attack_override: Dict = {
+        "enabled": bool(exp.get("attack_enabled", False)),
+        "name": str(exp.get("attack", "none")),
+    }
+    # Only override attack sub-config when explicitly provided by the experiment entry.
+    # This avoids silently clobbering values from base_config.py (e.g., gaussian.sigma).
+    if "attack_params" in exp and isinstance(exp["attack_params"], dict):
+        attack_override.update(exp["attack_params"])
+
+    defense_override: Dict = {
+        "enabled": bool(exp.get("defense_enabled", False)),
+        "name": str(exp.get("defense", "none")),
+    }
+    if "defense_params" in exp and isinstance(exp["defense_params"], dict):
+        defense_override.update(exp["defense_params"])
+
     override: Dict = {
         "attack_config": {
-            "enabled": bool(exp.get("attack_enabled", False)),
-            "name": str(exp.get("attack", "none")),
-            # ---- Attack hyperparam templates (edit as needed) ----
-            "naive_sharpening": {"temperature": 0.5, "max_abs_logit": None},
-            "manipulating_kd": {"gamma": 0.5, "min_margin": 1e-3, "max_margin": 50.0, "l2_budget": None, "seed": 1234},
-            "fed_ace": {"tau": 0.7, "gamma": 0.5, "min_margin": 1e-3, "max_margin": 50.0, "l2_budget": None},
-            "fed_oca": {"gamma": 0.8, "min_margin": 1e-3, "max_margin": 50.0, "l2_budget": None},
-            # keep existing attacks' keys if your main.py merges them
-            "t3": {
-                "rho": 0.4,
-                "lambda_epistemic": 1.0,
-                "lambda_stealth": 1.0,
-                "lambda_align": 1.0,
-                "epsilon": 2.0,
-                "pgd_steps": 40,
-                "pgd_step_size": 0.2,
-                "history_window": 1,
-                "tta_type": "strong",
-                "debug": False,
-            },
-            "topk": {"k": 3, "delta": -10.0, "normalize": True, "norm_low": -10.0, "norm_high": 10.0},
-            "gaussian": {"sigma": 0.1},
-            "label_flip": {"flip_probability": 0.5},
-            "impersonation": {},
+            **attack_override,
         },
         "defense_config": {
-            "enabled": bool(exp.get("defense_enabled", False)),
-            "name": str(exp.get("defense", "none")),
-            # ---- Defense hyperparam templates (edit as needed) ----
-            "mkrum": {"f": 1, "m": 1, "use_squared": True},
-            "trimean": {"q": 0.25},
-            "fedmdr": {"trim_ratio": 0.2, "softmax_temp": 1.0, "max_iter": 50, "eps": 1e-6, "min_clients_kept": 2},
-            "fedtgd": {"topk": 5, "dbscan_eps": 0.5, "dbscan_min_samples": 2, "cosine_keep_ratio": 1.0, "fallback": "mean"},
-            "cronus": {"temperature": 1.0, "gamma": 2.0, "trimming_fraction": 0.2, "min_clients_kept": 2},
-            "entropy_clip": {"max_entropy": 2.5},
-            "none": {},
+            **defense_override,
         },
     }
 

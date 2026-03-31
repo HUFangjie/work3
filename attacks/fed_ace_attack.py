@@ -29,9 +29,10 @@ class FedACEAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.delta_wrong: float = float(self.cfg.get("delta_wrong", 6.0))
-        self.delta_correct: float = float(self.cfg.get("delta_correct", 1.5))
-        self.clip: float = float(self.cfg.get("clip", 20.0))
+        sub = (self.cfg or {}).get("fed_ace", {})
+        self.delta_wrong: float = float(sub.get("delta_wrong", self.cfg.get("delta_wrong", 6.0)))
+        self.delta_correct: float = float(sub.get("delta_correct", self.cfg.get("delta_correct", 1.5)))
+        self.clip: float = float(sub.get("clip", self.cfg.get("clip", 20.0)))
 
     @staticmethod
     def _safe_pull_top1(logits_row: torch.Tensor, top1: int, delta: float) -> torch.Tensor:
