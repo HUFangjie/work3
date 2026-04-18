@@ -69,7 +69,12 @@ class ImpersonationAttack(BaseAttack):
         if self.top1_boost != 0.0:
             pred = adv.argmax(dim=-1)
             adv = adv.clone()
-            src = torch.full_like(pred.unsqueeze(-1).float(), self.top1_boost)
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.top1_boost,
+                device=adv.device,
+                dtype=adv.dtype,
+            )
             adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
         # 3) optional clipping for numerical stability
         if self.max_abs_logit is not None and self.max_abs_logit > 0:
