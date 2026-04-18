@@ -48,7 +48,13 @@ class FedOCAAttack(BaseAttack):
         if self.margin != 0.0:
             pred = adv.argmax(dim=-1)
             adv = adv.clone()
-            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.margin))
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.margin,
+                device=adv.device,
+                dtype=adv.dtype,
+            )
+            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
         if self.clip > 0:
             adv = torch.clamp(adv, -self.clip, self.clip)
         return adv

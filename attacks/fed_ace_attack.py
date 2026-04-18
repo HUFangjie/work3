@@ -65,17 +65,29 @@ class FedACEAttack(BaseAttack):
         pred = adv.argmax(dim=-1)
         if y_public is None:
             # Fallback: overconfidence on predicted class
-            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.delta_wrong))
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.delta_wrong,
+                device=adv.device,
+                dtype=adv.dtype,
+            )
+            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
         else:
             y = y_public.view(-1).to(pred.device)
             correct = pred.eq(y)
 
             # Increase confidence for wrong predictions
             if (~correct).any():
+                src = torch.full(
+                    pred[~correct].unsqueeze(-1).shape,
+                    self.delta_wrong,
+                    device=adv.device,
+                    dtype=adv.dtype,
+                )
                 adv.scatter_add_(
                     dim=-1,
                     index=pred[~correct].unsqueeze(-1),
-                    src=torch.full_like(pred[~correct].unsqueeze(-1).float(), self.delta_wrong),
+                    src=src,
                 )
 
             # Decrease confidence for correct predictions (without changing argmax)
