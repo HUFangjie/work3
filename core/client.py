@@ -185,6 +185,10 @@ class Client:
         # Micro-batch inference to cap activation peak.
         micro_bs = int(self.fd_config.get("public_logits_micro_bs", 32))
         micro_bs = max(1, micro_bs)
+        # Impersonation attack needs whole-batch benign reference logits;
+        # using micro-batches can create shape mismatch against pooled targets.
+        if bool(getattr(self.attack, "requires_benign_pool", False)):
+            micro_bs = int(x_public.size(0))
         use_amp = bool(self.fd_config.get("public_logits_amp", True))
 
         # Ensure model is on GPU for the actual forward if needed (model only).

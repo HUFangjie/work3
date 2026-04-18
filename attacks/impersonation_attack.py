@@ -46,4 +46,11 @@ class ImpersonationAttack(BaseAttack):
         if target is None:
             # fallback: if pool not available, do nothing (safe default)
             return logits
+        if target.shape != logits.shape:
+            # Safety fallback: align to current micro-batch shape.
+            # This should rarely happen after forcing full-batch mode for impersonation.
+            if target.dim() == logits.dim() and target.size(-1) == logits.size(-1):
+                target = target[: logits.size(0)]
+            else:
+                return logits
         return target.to(logits.device).type_as(logits)
