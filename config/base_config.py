@@ -103,7 +103,13 @@ BASE_CONFIG: Dict[str, Any] = {
         "norm_high": 10.0,
         },
         "impersonation": {
-        # no hyperparams needed in the paper's definition
+            # Strength knobs (defaults preserve original behavior):
+            # - logit_scale > 1.0  : sharpen impersonated logits globally
+            # - top1_boost > 0.0   : further increase top-1 confidence margin
+            # - max_abs_logit      : optional clamp for stability (None disables)
+            "logit_scale": 1.0,
+            "top1_boost": 0.0,
+            "max_abs_logit": None,
         },
 
         # --- New attacks (calibration/confidence baselines) ---

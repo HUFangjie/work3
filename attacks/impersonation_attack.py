@@ -29,6 +29,12 @@ class ImpersonationAttack(BaseAttack):
         model: Optional[nn.Module] = None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
+        sub = (self.cfg or {}).get("impersonation", {})
+        # Strength knobs (default keeps previous behavior)
+        self.logit_scale: float = float(sub.get("logit_scale", 1.0))
+        self.top1_boost: float = float(sub.get("top1_boost", 0.0))
+        max_abs = sub.get("max_abs_logit", None)
+        self.max_abs_logit: Optional[float] = float(max_abs) if max_abs is not None else None
 
     def attack_logits(
         self,
@@ -53,4 +59,20 @@ class ImpersonationAttack(BaseAttack):
                 target = target[: logits.size(0)]
             else:
                 return logits
-        return target.to(logits.device).type_as(logits)
+        adv = target.to(logits.device).type_as(logits)
+
+        # Optional strength amplification:
+        # 1) globally scale logits (sharper confidence if >1)
+        if self.logit_scale != 1.0:
+            adv = adv * self.logit_scale
+        # 2) optionally boost current top-1 class margin
+        if self.top1_boost != 0.0:
+            pred = adv.argmax(dim=-1)
+            adv = adv.clone()
+            src = torch.full_like(pred.unsqueeze(-1).float(), self.top1_boost)
+            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
+        # 3) optional clipping for numerical stability
+        if self.max_abs_logit is not None and self.max_abs_logit > 0:
+            adv = torch.clamp(adv, -self.max_abs_logit, self.max_abs_logit)
+
+        return adv
