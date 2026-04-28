@@ -17,7 +17,13 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 
-from data.transforms import get_fmnist_transforms, get_cifar10_transforms, get_pathmnist_transforms
+from data.transforms import (
+    get_mnist_transforms,
+    get_fmnist_transforms,
+    get_cifar10_transforms,
+    get_pathmnist_transforms,
+)
+from data.mnist_loader import get_mnist_datasets
 from data.fmnist_loader import get_fmnist_datasets
 from data.cifar10_loader import get_cifar10_datasets
 from data.pathmnist_loader import get_pathmnist_datasets
@@ -75,7 +81,14 @@ class DataManager:
         """
         Load raw train/test datasets with appropriate transforms.
         """
-        if self.dataset_name in ["fmnist", "fashion_mnist"]:
+        if self.dataset_name in ["mnist", "minist"]:
+            train_transform, test_transform = get_mnist_transforms()
+            train_dataset, test_dataset = get_mnist_datasets(
+                data_root=self.data_root,
+                train_transform=train_transform,
+                test_transform=test_transform,
+            )
+        elif self.dataset_name in ["fmnist", "fashion_mnist"]:
             train_transform, test_transform = get_fmnist_transforms()
             train_dataset, test_dataset = get_fmnist_datasets(
                 data_root=self.data_root,

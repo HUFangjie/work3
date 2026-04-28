@@ -30,9 +30,11 @@ class ManipulatingKDAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.temperature: float = float(self.cfg.get("temperature", 0.5))  # <1 sharper
-        self.bias: float = float(self.cfg.get("bias", 0.02))  # prob mass added to argmax
-        self.eps: float = float(self.cfg.get("eps", 1e-8))
+        sub = (self.cfg or {}).get("manipulating_kd", {})
+        self.temperature: float = float(sub.get("temperature", self.cfg.get("temperature", 0.5)))  # <1 sharper
+        # backward compatible: gamma can act as bias magnitude
+        self.bias: float = float(sub.get("bias", sub.get("gamma", self.cfg.get("bias", 0.02))))
+        self.eps: float = float(sub.get("eps", self.cfg.get("eps", 1e-8)))
 
     def attack_logits(
         self,
@@ -52,7 +54,13 @@ class ManipulatingKDAttack(BaseAttack):
         if self.bias > 0:
             pred = probs.argmax(dim=-1)
             probs = probs * (1.0 - self.bias)
-            probs.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.bias))
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.bias,
+                device=probs.device,
+                dtype=probs.dtype,
+            )
+            probs.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
             probs = probs / probs.sum(dim=-1, keepdim=True).clamp_min(self.eps)
 
         adv_logits = torch.log(probs.clamp_min(self.eps))

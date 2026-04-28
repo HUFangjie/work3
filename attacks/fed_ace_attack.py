@@ -29,9 +29,10 @@ class FedACEAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.delta_wrong: float = float(self.cfg.get("delta_wrong", 6.0))
-        self.delta_correct: float = float(self.cfg.get("delta_correct", 1.5))
-        self.clip: float = float(self.cfg.get("clip", 20.0))
+        sub = (self.cfg or {}).get("fed_ace", {})
+        self.delta_wrong: float = float(sub.get("delta_wrong", self.cfg.get("delta_wrong", 6.0)))
+        self.delta_correct: float = float(sub.get("delta_correct", self.cfg.get("delta_correct", 1.5)))
+        self.clip: float = float(sub.get("clip", self.cfg.get("clip", 20.0)))
 
     @staticmethod
     def _safe_pull_top1(logits_row: torch.Tensor, top1: int, delta: float) -> torch.Tensor:
@@ -64,17 +65,29 @@ class FedACEAttack(BaseAttack):
         pred = adv.argmax(dim=-1)
         if y_public is None:
             # Fallback: overconfidence on predicted class
-            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.delta_wrong))
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.delta_wrong,
+                device=adv.device,
+                dtype=adv.dtype,
+            )
+            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
         else:
             y = y_public.view(-1).to(pred.device)
             correct = pred.eq(y)
 
             # Increase confidence for wrong predictions
             if (~correct).any():
+                src = torch.full(
+                    pred[~correct].unsqueeze(-1).shape,
+                    self.delta_wrong,
+                    device=adv.device,
+                    dtype=adv.dtype,
+                )
                 adv.scatter_add_(
                     dim=-1,
                     index=pred[~correct].unsqueeze(-1),
-                    src=torch.full_like(pred[~correct].unsqueeze(-1).float(), self.delta_wrong),
+                    src=src,
                 )
 
             # Decrease confidence for correct predictions (without changing argmax)

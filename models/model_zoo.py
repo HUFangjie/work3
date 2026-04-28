@@ -8,6 +8,7 @@ Single entry point:
     get_model(name, **kwargs) -> nn.Module
 
 Supported names:
+  - "mnist_cnn"        : MNISTCNN (28x28 grayscale)
   - "fmnist_cnn"       : FMNISTCNN (28x28 grayscale)
   - "femnist_cnn"      : alias of FMNISTCNN
   - "cifar10_cnn"      : CIFAR10CNN (32x32 RGB)
@@ -27,6 +28,7 @@ import torch
 import torch.nn as nn
 
 from models.fmnist_cnn import FMNISTCNN
+from models.mnist_cnn import MNISTCNN
 from models.cifar10_cnn import CIFAR10CNN
 
 
@@ -99,6 +101,7 @@ def _build_resnet(
 
 
 _MODEL_REGISTRY: Dict[str, Callable[..., nn.Module]] = {
+    "mnist_cnn": MNISTCNN,
     "fmnist_cnn": FMNISTCNN,
     "femnist_cnn": FMNISTCNN,
     "cifar10_cnn": CIFAR10CNN,
@@ -160,7 +163,11 @@ def adapt_model_config_for_dataset(
         if key not in cfg or override_if(cfg.get(key)):
             cfg[key] = value
 
-    if dataset in ["fmnist", "fashion_mnist"]:
+    if dataset in ["mnist", "minist"]:
+        _maybe_set("input_channels", 1, lambda v: v not in (1,))
+        _maybe_set("num_classes", 10, lambda v: v not in (10,))
+        _maybe_set("name", "mnist_cnn", lambda v: str(v).lower() != "mnist_cnn")
+    elif dataset in ["fmnist", "fashion_mnist"]:
         _maybe_set("input_channels", 1, lambda v: v not in (1,))
         _maybe_set("num_classes", 10, lambda v: v not in (10,))
         _maybe_set("name", "fmnist_cnn", lambda v: str(v).lower() not in ("fmnist_cnn", "femnist_cnn"))

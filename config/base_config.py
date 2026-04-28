@@ -18,7 +18,7 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Dataset & partitioning
     "data_config": {
-        "dataset": "cifar10",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
+        "dataset": "cifar10",         # ["mnist","fmnist", "cifar10", "tiny_imagenet", ...]
         # "data_root": "./data/MedMNIST",
         "data_root": "./data",
         "num_clients": 10,
@@ -103,7 +103,13 @@ BASE_CONFIG: Dict[str, Any] = {
         "norm_high": 10.0,
         },
         "impersonation": {
-        # no hyperparams needed in the paper's definition
+            # Strength knobs (defaults preserve original behavior):
+            # - logit_scale > 1.0  : sharpen impersonated logits globally
+            # - top1_boost > 0.0   : further increase top-1 confidence margin
+            # - max_abs_logit      : optional clamp for stability (None disables)
+            "logit_scale": 1.0,
+            "top1_boost": 0.0,
+            "max_abs_logit": None,
         },
 
         # --- New attacks (calibration/confidence baselines) ---
@@ -136,7 +142,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd","confidence_aware","fedgraphguard"]
         "none": {},
 
         "entropy_clip": {
@@ -172,6 +178,35 @@ BASE_CONFIG: Dict[str, Any] = {
             "dbscan_min_samples": 2,
             "cosine_keep_ratio": 1.0,
             "fallback": "mean",   # ["mean","median"]
+        },
+        "confidence_aware": {
+            "tau_conf": 0.9,
+            "hist_window": 5,
+            "beta": 2.0,
+            "eps": 1e-12,
+            "lambdas": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        "fedgraphguard": {
+            "temperature": 1.0,
+            "topk": 3,
+            "winsor_q": 0.1,
+            "rn": 3,
+            "gnn_layers": 2,
+            "gnn_gamma": 0.5,
+            "lrr_lambda": 0.05,
+            "lrr_gamma": 0.01,
+            "lrr_iters": 40,
+            "lrr_lr": 0.1,
+            "alpha": 0.6,
+            "n_clusters": 2,
+            "tau": 1.0,
+            "phi_min": 0.02,
+            "ppr_beta": 0.85,
+            "ppr_max_iter": 100,
+            "ppr_tol": 1e-6,
+            "trust_threshold": 0.1,
+            "trim_ratio": 0.2,
+            "eps": 1e-12,
         },
     },
 

@@ -23,8 +23,21 @@ class NaiveSharpeningAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.scale: float = float(self.cfg.get("scale", 3.0))  # >1 sharpens
-        self.clip: float = float(self.cfg.get("clip", 20.0))
+        sub = (self.cfg or {}).get("naive_sharpening", {})
+        # Backward compatibility:
+        #  - preferred: `temperature` (<1 => sharper)
+        #  - legacy: `scale` (>1 => sharper)
+        temperature = sub.get("temperature", None)
+        if temperature is None:
+            self.scale = float(sub.get("scale", self.cfg.get("scale", 3.0)))
+        else:
+            t = max(float(temperature), 1e-6)
+            self.scale = 1.0 / t
+
+        clip_v = sub.get("max_abs_logit", None)
+        if clip_v is None:
+            clip_v = sub.get("clip", self.cfg.get("clip", 20.0))
+        self.clip = float(clip_v) if clip_v is not None else 0.0
 
     def attack_logits(
         self,

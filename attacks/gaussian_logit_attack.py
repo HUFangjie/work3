@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import torch
+import torch.nn as nn
 
 from attacks.base_attack import BaseAttack
 
@@ -24,8 +25,14 @@ class GaussianLogitAttack(BaseAttack):
         is_malicious: bool,
         cfg: Optional[Dict[str, Any]] = None,
         client_id: Optional[int] = None,
+        model: Optional[nn.Module] = None,
     ) -> None:
-        super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id)
+        super().__init__(
+            is_malicious=is_malicious,
+            cfg=cfg,
+            client_id=client_id,
+            model=model,
+        )
         # 从总攻配置中取出 Gaussian 子配置
         g_cfg = (cfg or {}).get("gaussian", {})
         self.sigma: float = float(g_cfg.get("sigma", 0.1))
@@ -34,8 +41,10 @@ class GaussianLogitAttack(BaseAttack):
         self,
         x_public: torch.Tensor,
         logits: torch.Tensor,
+        y_public: Optional[torch.Tensor] = None,
         round_idx: Optional[int] = None,
         global_step: Optional[int] = None,
+        **kwargs: Any,
     ) -> torch.Tensor:
         if not self.is_malicious:
             return logits

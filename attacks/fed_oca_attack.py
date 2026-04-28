@@ -27,9 +27,10 @@ class FedOCAAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.scale: float = float(self.cfg.get("scale", 2.5))
-        self.margin: float = float(self.cfg.get("margin", 0.0))
-        self.clip: float = float(self.cfg.get("clip", 20.0))
+        sub = (self.cfg or {}).get("fed_oca", {})
+        self.scale: float = float(sub.get("scale", self.cfg.get("scale", 2.5)))
+        self.margin: float = float(sub.get("margin", self.cfg.get("margin", 0.0)))
+        self.clip: float = float(sub.get("clip", self.cfg.get("clip", 20.0)))
 
     def attack_logits(
         self,
@@ -47,7 +48,13 @@ class FedOCAAttack(BaseAttack):
         if self.margin != 0.0:
             pred = adv.argmax(dim=-1)
             adv = adv.clone()
-            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.margin))
+            src = torch.full(
+                pred.unsqueeze(-1).shape,
+                self.margin,
+                device=adv.device,
+                dtype=adv.dtype,
+            )
+            adv.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=src)
         if self.clip > 0:
             adv = torch.clamp(adv, -self.clip, self.clip)
         return adv
