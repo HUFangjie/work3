@@ -44,34 +44,29 @@ python observation1_lowrank.py --logits-npz path/to/obs1_logits.npz --out-dir ..
 ```
 
 
-## 如何获取 `obs1_logits.npz` 和 `benign_logits.npy`
+## 如何从真实联邦训练导出 logits
 
-你有两种方式：
+你需要在**真实训练流程**中导出每个客户端在公共数据集上的 logits（不是 mock）。
 
-1. **真实实验数据（推荐）**
-   - 从你自己的联邦训练流程里导出每个客户端在公共数据集上的 logits。
-   - `obs1_logits.npz`：包含多个 key（例如 `alpha_0.5_seed_1`），每个 value 的 shape 都是 `(K, N_pub, C)`。
-   - `benign_logits.npy`：shape 为 `(K, N_pub, C)`。
+### 目标文件格式
 
-2. **先用 mock 数据跑通流程（快速验证脚本）**
-   - 运行：
+- `benign_logits.npy`：shape `(K, N_pub, C)`，表示 K 个客户端在公共集上的 logits。
+- `obs1_logits.npz`：多个 key（如 `alpha_0.5_seed_1`），每个 value shape `(K, N_pub, C)`。
 
-```bash
-python -m observations.fedgraphguard_regtrust.generate_mock_inputs   --out-dir observations/mock_inputs
-```
+### 推荐导出流程
 
-   - 输出：
-     - `observations/mock_inputs/obs1_logits.npz`
-     - `observations/mock_inputs/benign_logits.npy`
+1. 按你的实验配置完成一轮真实联邦训练（或收敛后的模型）。
+2. 固定公共数据集（与 observation 一致）。
+3. 逐客户端前向公共数据集，拼接得到每个客户端的 `N_pub x C` logits。
+4. `np.save('benign_logits.npy', logits_all_clients)`。
+5. 对 Observation-1，不同 `alpha` 与 `seed` 重复上述过程，然后将每次结果写入 `obs1_logits.npz` 对应 key。
 
-   - 然后可直接运行三个 observation：
+### 运行 observation
 
 ```bash
-python -m observations.fedgraphguard_regtrust.observation1_lowrank   --logits-npz observations/mock_inputs/obs1_logits.npz   --out-dir observations/outputs/obs1
+python -m observations.fedgraphguard_regtrust.observation1_lowrank   --logits-npz path/to/obs1_logits.npz   --out-dir observations/outputs/obs1
 
-python -m observations.fedgraphguard_regtrust.observation2_rowsparse   --benign-logits-npy observations/mock_inputs/benign_logits.npy   --out-dir observations/outputs/obs2
+python -m observations.fedgraphguard_regtrust.observation2_rowsparse   --benign-logits-npy path/to/benign_logits.npy   --out-dir observations/outputs/obs2
 
-python -m observations.fedgraphguard_regtrust.observation3_conductance_ppr   --benign-logits-npy observations/mock_inputs/benign_logits.npy   --out-dir observations/outputs/obs3
+python -m observations.fedgraphguard_regtrust.observation3_conductance_ppr   --benign-logits-npy path/to/benign_logits.npy   --out-dir observations/outputs/obs3
 ```
-
-> 注意：mock 数据仅用于检查代码链路是否打通，不代表真实实验结论。
