@@ -87,3 +87,12 @@ python -m observations.fedgraphguard_regtrust.observation2_rowsparse   --benign-
 
 python -m observations.fedgraphguard_regtrust.observation3_conductance_ppr   --benign-logits-npy path/to/benign_logits.npy   --out-dir observations/outputs/obs3
 ```
+
+
+### 常见报错排查
+
+- `ModuleNotFoundError: No module named config`
+  - 已在 `export_real_logits.py` 内自动将项目根目录加入 `sys.path`，支持你在非仓库根目录启动命令。
+
+- `libgomp: Invalid value for environment variable OMP_NUM_THREADS`
+  - `export_real_logits.py` 启动时会自动检查 `OMP_NUM_THREADS`，若值非法则回退到 `1`。

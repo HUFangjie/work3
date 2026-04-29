@@ -9,9 +9,22 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import random
+import sys
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, List
+
+# Some environments set invalid OMP_NUM_THREADS values (e.g., empty / non-integer),
+# which causes libgomp to abort at runtime. Force a safe default when invalid.
+_omp = os.environ.get("OMP_NUM_THREADS", "").strip()
+if (not _omp.isdigit()) or int(_omp) <= 0:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+# Ensure project root is importable even when launched outside repository root.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 import numpy as np
 import torch
@@ -19,7 +32,6 @@ import torch
 from config.base_config import get_base_config
 from core.federated_distillation import run_federated_distillation
 from main import build_clients, build_data_manager, build_server
-
 
 class _NoopWriter:
     def add_scalar(self, *args, **kwargs):
