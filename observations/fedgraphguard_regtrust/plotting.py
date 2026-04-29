@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-plt.style.use("seaborn-v0_8-whitegrid")
+_PREFERRED_STYLES = ("seaborn-v0_8-whitegrid", "seaborn-whitegrid", "ggplot")
+_AVAILABLE_STYLES = set(plt.style.available)
+_STYLE_TO_USE = next((name for name in _PREFERRED_STYLES if name in _AVAILABLE_STYLES), "default")
+plt.style.use(_STYLE_TO_USE)
 
 
 def _ensure_parent(path: Path) -> None:
