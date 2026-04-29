@@ -32,3 +32,13 @@ python -m observations.fedgraphguard_regtrust.observation3_conductance_ppr \
 
 - `obs1_logits.npz`: key 形如 `alpha_0.5_seed_1`，值 shape `(K, N_pub, C)`
 - `benign_logits.npy`: shape `(K, N_pub, C)`
+
+## 直接脚本运行（不通过 -m）
+
+如果你在该目录下直接执行脚本（例如 `python observation1_lowrank.py ...`），
+现在也支持；脚本会自动处理导入路径。
+
+```bash
+cd observations/fedgraphguard_regtrust
+python observation1_lowrank.py --logits-npz path/to/obs1_logits.npz --out-dir ../../observations/outputs/obs1
+```

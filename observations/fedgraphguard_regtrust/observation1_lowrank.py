@@ -12,8 +12,15 @@ from typing import Dict, List
 
 import numpy as np
 
-from .common_metrics import jaccard_similarity_matrix, singular_spectrum_metrics
-from .plotting import plot_exp1_energy_curves
+if __package__ in (None, ""):
+    import sys
+
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from common_metrics import jaccard_similarity_matrix, singular_spectrum_metrics
+    from plotting import plot_exp1_energy_curves
+else:
+    from .common_metrics import jaccard_similarity_matrix, singular_spectrum_metrics
+    from .plotting import plot_exp1_energy_curves
 
 
 def run_observation1(logits_npz: str, out_dir: str, kappa: int = 5) -> Dict[str, float]:

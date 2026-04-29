@@ -9,15 +9,29 @@ from typing import Dict, Sequence
 
 import numpy as np
 
-from .common_metrics import (
-    apply_attack,
-    connectivity_stats,
-    jaccard_similarity_matrix,
-    low_rank_rpca,
-    personalized_pagerank,
-    spectral_gap,
-)
-from .plotting import plot_exp3_trust_scores
+if __package__ in (None, ""):
+    import sys
+
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from common_metrics import (
+        apply_attack,
+        connectivity_stats,
+        jaccard_similarity_matrix,
+        low_rank_rpca,
+        personalized_pagerank,
+        spectral_gap,
+    )
+    from plotting import plot_exp3_trust_scores
+else:
+    from .common_metrics import (
+        apply_attack,
+        connectivity_stats,
+        jaccard_similarity_matrix,
+        low_rank_rpca,
+        personalized_pagerank,
+        spectral_gap,
+    )
+    from .plotting import plot_exp3_trust_scores
 
 
 def run_observation3(

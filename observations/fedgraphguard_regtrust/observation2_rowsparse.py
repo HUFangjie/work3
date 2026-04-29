@@ -9,14 +9,27 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 
-from .common_metrics import (
-    apply_attack,
-    byzantine_energy_concentration,
-    jaccard_similarity_matrix,
-    row_energy,
-    sparsity_ratio,
-)
-from .plotting import plot_exp2_row_energy
+if __package__ in (None, ""):
+    import sys
+
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from common_metrics import (
+        apply_attack,
+        byzantine_energy_concentration,
+        jaccard_similarity_matrix,
+        row_energy,
+        sparsity_ratio,
+    )
+    from plotting import plot_exp2_row_energy
+else:
+    from .common_metrics import (
+        apply_attack,
+        byzantine_energy_concentration,
+        jaccard_similarity_matrix,
+        row_energy,
+        sparsity_ratio,
+    )
+    from .plotting import plot_exp2_row_energy
 
 
 ATTACKS = ("gaussian", "label_flip", "targeted", "alie")
