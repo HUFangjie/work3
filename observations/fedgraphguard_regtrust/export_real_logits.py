@@ -55,6 +55,7 @@ def _build_config(
     num_rounds: int,
     local_epochs: int,
     clients_per_round: int,
+    data_root: str,
 ) -> Dict:
     cfg = get_base_config()
     cfg["seed"] = int(seed)
@@ -63,6 +64,7 @@ def _build_config(
     cfg["data_config"]["dataset"] = dataset
     cfg["data_config"]["num_clients"] = int(num_clients)
     cfg["data_config"]["partition_type"] = "dirichlet"
+    cfg["data_config"]["data_root"] = data_root
     cfg["data_config"]["dirichlet_alpha"] = float(alpha)
 
     cfg["fd_config"]["num_rounds"] = int(num_rounds)
@@ -139,6 +141,7 @@ def main() -> None:
     parser.add_argument("--num-rounds", type=int, default=20)
     parser.add_argument("--local-epochs", type=int, default=3)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--data-root", default="./data", help="Dataset root passed to DataManager (e.g., analysis/data)")
 
     parser.add_argument("--benign-alpha", type=float, default=0.5, help="Alpha used to export benign_logits.npy")
     parser.add_argument("--benign-seed", type=int, default=42)
@@ -160,6 +163,7 @@ def main() -> None:
         num_rounds=args.num_rounds,
         local_epochs=args.local_epochs,
         clients_per_round=args.clients_per_round,
+        data_root=args.data_root,
     )
     _train_and_export_one(benign_cfg, out_benign_npy=Path(args.out_benign_npy))
 
@@ -177,6 +181,7 @@ def main() -> None:
                 num_rounds=args.num_rounds,
                 local_epochs=args.local_epochs,
                 clients_per_round=args.clients_per_round,
+                data_root=args.data_root,
             )
             logits = _train_and_export_one(cfg, out_benign_npy=None)
             obs1_payload[f"alpha_{alpha}_seed_{s}"] = logits
