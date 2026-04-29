@@ -61,6 +61,23 @@ python observation1_lowrank.py --logits-npz path/to/obs1_logits.npz --out-dir ..
 4. `np.save('benign_logits.npy', logits_all_clients)`。
 5. 对 Observation-1，不同 `alpha` 与 `seed` 重复上述过程，然后将每次结果写入 `obs1_logits.npz` 对应 key。
 
+
+
+### 一键真实导出脚本（推荐）
+
+已提供 `export_real_logits.py`，可直接复用当前项目 federated 流程（DataManager / Client / Server / FD 主循环）训练后导出：
+
+- `benign_logits.npy`
+- `obs1_logits.npz`
+
+运行示例：
+
+```bash
+python -m observations.fedgraphguard_regtrust.export_real_logits   --dataset cifar10   --num-clients 20   --clients-per-round 20   --num-rounds 20   --local-epochs 3   --benign-alpha 0.5   --benign-seed 42   --obs1-alphas 0.1 0.3 0.5 1.0   --obs1-seeds 0 1 2 3 4   --out-benign-npy observations/real_inputs/benign_logits.npy   --out-obs1-npz observations/real_inputs/obs1_logits.npz
+```
+
+导出完成后，直接运行 observation 脚本即可。
+
 ### 运行 observation
 
 ```bash
