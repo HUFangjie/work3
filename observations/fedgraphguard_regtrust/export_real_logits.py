@@ -33,6 +33,23 @@ from config.base_config import get_base_config
 from core.federated_distillation import run_federated_distillation
 from main import build_clients, build_data_manager, build_server
 
+
+
+def _resolve_output_path(path_str: str, run_tag: str, auto_suffix: bool) -> Path:
+    p = Path(path_str)
+    if run_tag:
+        p = p.with_name(f"{p.stem}_{run_tag}{p.suffix}")
+    if auto_suffix and p.exists():
+        idx = 1
+        while True:
+            cand = p.with_name(f"{p.stem}_v{idx}{p.suffix}")
+            if not cand.exists():
+                p = cand
+                break
+            idx += 1
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 class _NoopWriter:
     def add_scalar(self, *args, **kwargs):
         return None
@@ -154,7 +171,15 @@ def main() -> None:
     parser.add_argument("--obs1-seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--obs1-seed-offset", type=int, default=1000)
     parser.add_argument("--out-obs1-npz", default="observations/real_inputs/obs1_logits.npz")
+    parser.add_argument("--run-tag", default="", help="Optional tag appended to output filenames")
+    parser.add_argument("--auto-suffix", action="store_true", help="If output exists, append _vN to avoid overwrite")
     args = parser.parse_args()
+
+    out_benign = _resolve_output_path(args.out_benign_npy, run_tag=args.run_tag, auto_suffix=args.auto_suffix)
+    out_obs1 = _resolve_output_path(args.out_obs1_npz, run_tag=args.run_tag, auto_suffix=args.auto_suffix)
+
+    print(f"[export_real_logits] benign output: {out_benign}")
+    print(f"[export_real_logits] obs1 output  : {out_obs1}")
 
     # 1) benign_logits.npy
     benign_cfg = _build_config(
@@ -169,7 +194,7 @@ def main() -> None:
         data_root=args.data_root,
         allow_download=args.allow_download,
     )
-    _train_and_export_one(benign_cfg, out_benign_npy=Path(args.out_benign_npy))
+    _train_and_export_one(benign_cfg, out_benign_npy=out_benign)
 
     # 2) obs1_logits.npz
     obs1_payload = {}
@@ -191,9 +216,7 @@ def main() -> None:
             logits = _train_and_export_one(cfg, out_benign_npy=None)
             obs1_payload[f"alpha_{alpha}_seed_{s}"] = logits
 
-    out_npz = Path(args.out_obs1_npz)
-    out_npz.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_npz, **obs1_payload)
+    np.savez_compressed(out_obs1, **obs1_payload)
 
 
 if __name__ == "__main__":
