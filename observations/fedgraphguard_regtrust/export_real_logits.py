@@ -74,6 +74,7 @@ def _build_config(
     clients_per_round: int,
     data_root: str,
     allow_download: bool,
+    exp_name: str,
 ) -> Dict:
     cfg = get_base_config()
     cfg["seed"] = int(seed)
@@ -97,6 +98,7 @@ def _build_config(
 
     # keep exporter quiet and lightweight
     cfg["logging_config"]["use_tensorboard"] = False
+    cfg["logging_config"]["exp_name"] = exp_name
     cfg["evaluation_config"]["eval_every"] = max(1_000_000, int(num_rounds) + 1)
     return cfg
 
@@ -173,6 +175,7 @@ def main() -> None:
     parser.add_argument("--out-obs1-npz", default="observations/real_inputs/obs1_logits.npz")
     parser.add_argument("--run-tag", default="", help="Optional tag appended to output filenames")
     parser.add_argument("--auto-suffix", action="store_true", help="If output exists, append _vN to avoid overwrite")
+    parser.add_argument("--log-exp-prefix", default="obs_export", help="Prefix for per-run logging exp_name to avoid reliability overwrite")
     args = parser.parse_args()
 
     out_benign = _resolve_output_path(args.out_benign_npy, run_tag=args.run_tag, auto_suffix=args.auto_suffix)
@@ -193,6 +196,7 @@ def main() -> None:
         clients_per_round=args.clients_per_round,
         data_root=args.data_root,
         allow_download=args.allow_download,
+        exp_name=f"{args.log_exp_prefix}_benign_a{args.benign_alpha}_s{args.benign_seed}",
     )
     _train_and_export_one(benign_cfg, out_benign_npy=out_benign)
 
@@ -212,6 +216,7 @@ def main() -> None:
                 clients_per_round=args.clients_per_round,
                 data_root=args.data_root,
                 allow_download=args.allow_download,
+                exp_name=f"{args.log_exp_prefix}_obs1_a{alpha}_s{s}",
             )
             logits = _train_and_export_one(cfg, out_benign_npy=None)
             obs1_payload[f"alpha_{alpha}_seed_{s}"] = logits

@@ -73,7 +73,7 @@ python observation1_lowrank.py --logits-npz path/to/obs1_logits.npz --out-dir ..
 运行示例：
 
 ```bash
-python -m observations.fedgraphguard_regtrust.export_real_logits   --dataset cifar10   --num-clients 20   --clients-per-round 20   --num-rounds 20   --local-epochs 3   --data-root /autodl-tmp/t3code/t3_code/analysis/data   --benign-alpha 0.5   --benign-seed 42   --obs1-alphas 0.1 0.3 0.5 1.0   --obs1-seeds 0 1 2 3 4   --out-benign-npy observations/real_inputs/benign_logits.npy   --out-obs1-npz observations/real_inputs/obs1_logits.npz   --run-tag expA   --auto-suffix
+python -m observations.fedgraphguard_regtrust.export_real_logits   --dataset cifar10   --num-clients 20   --clients-per-round 20   --num-rounds 20   --local-epochs 3   --data-root /autodl-tmp/t3code/t3_code/analysis/data   --benign-alpha 0.5   --benign-seed 42   --obs1-alphas 0.1 0.3 0.5 1.0   --obs1-seeds 0 1 2 3 4   --out-benign-npy observations/real_inputs/benign_logits.npy   --out-obs1-npz observations/real_inputs/obs1_logits.npz   --run-tag expA   --auto-suffix   --log-exp-prefix expA
 ```
 
 如果你本地已有 CIFAR-10（例如 `analysis/data/cifar-10-batches-py`），请将 `--data-root` 设为其上级目录（即 `analysis/data`）。
@@ -81,6 +81,8 @@ python -m observations.fedgraphguard_regtrust.export_real_logits   --dataset cif
 默认**不会自动下载**（export 脚本默认不加 `--allow-download`），若目录中文件缺失会直接报错；仅当你显式加 `--allow-download` 时才会下载。
 
 为避免同名文件覆盖，建议使用 `--run-tag`（例如 `expA`）或打开 `--auto-suffix` 自动追加 `_v1/_v2`。
+
+同时，为避免两组训练都写入同一个 `./logs/debug_run/reliability/test_round0020.npz`，脚本增加了 `--log-exp-prefix`，会给每一组（benign/obs1）生成不同的 `exp_name` 日志目录。
 
 导出完成后，直接运行 observation 脚本即可。
 
