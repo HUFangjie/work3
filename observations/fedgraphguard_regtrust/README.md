@@ -76,7 +76,9 @@ python observation1_lowrank.py --logits-npz path/to/obs1_logits.npz --out-dir ..
 python -m observations.fedgraphguard_regtrust.export_real_logits   --dataset cifar10   --num-clients 20   --clients-per-round 20   --num-rounds 20   --local-epochs 3   --data-root /autodl-tmp/t3code/t3_code/analysis/data   --benign-alpha 0.5   --benign-seed 42   --obs1-alphas 0.1 0.3 0.5 1.0   --obs1-seeds 0 1 2 3 4   --out-benign-npy observations/real_inputs/benign_logits.npy   --out-obs1-npz observations/real_inputs/obs1_logits.npz
 ```
 
-如果你本地已有 CIFAR-10（例如 `analysis/data/cifar-10-batches-py`），请将 `--data-root` 设为其上级目录（即 `analysis/data`），这样会直接复用本地数据而不会重新下载。
+如果你本地已有 CIFAR-10（例如 `analysis/data/cifar-10-batches-py`），请将 `--data-root` 设为其上级目录（即 `analysis/data`）。
+
+默认**不会自动下载**（export 脚本默认不加 `--allow-download`），若目录中文件缺失会直接报错；仅当你显式加 `--allow-download` 时才会下载。
 
 导出完成后，直接运行 observation 脚本即可。
 
