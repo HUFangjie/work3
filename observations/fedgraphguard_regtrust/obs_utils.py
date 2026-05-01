@@ -52,3 +52,26 @@ def resolve_out_dir(path_str: str) -> Path:
         return ensure_dir(p)
     root = find_project_root()
     return ensure_dir((root / p).resolve())
+
+
+def resolve_input_file(path_str: str) -> Path:
+    p = Path(path_str)
+    cands = []
+    if p.is_absolute():
+        cands.append(p)
+    else:
+        cands.append((Path.cwd() / p).resolve())
+        root = find_project_root()
+        cands.append((root / p).resolve())
+        cands.append((Path('/') / p).resolve())
+
+    for c in cands:
+        if c.exists() and c.is_file():
+            return c
+
+    raise FileNotFoundError(
+        "Input logits npz not found.\n"
+        f"Requested: {path_str}\n"
+        f"Current working directory: {Path.cwd()}\n"
+        "Candidates tried:\n  - " + "\n  - ".join(str(x) for x in cands)
+    )

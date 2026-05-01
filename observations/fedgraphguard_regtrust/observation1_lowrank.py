@@ -12,10 +12,10 @@ if __package__ in (None, ""):
     from pathlib import Path
 
     sys.path.append(str(Path(__file__).resolve().parent))
-    from obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir
+    from obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir, resolve_input_file
     from plotting import plot_obs1_cumulative_energy_grid
 else:
-    from .obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir
+    from .obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir, resolve_input_file
     from .plotting import plot_obs1_cumulative_energy_grid
 
 
@@ -50,7 +50,9 @@ def main():
     png_path = out_dir / f"{run_id}_cumulative_energy.png"
     pdf_path = out_dir / f"{run_id}_cumulative_energy.pdf"
 
-    payload = np.load(args.logits_npz)
+    logits_npz = resolve_input_file(args.logits_npz)
+    print(f"[Obs1] resolved logits npz = {logits_npz}")
+    payload = np.load(logits_npz)
     rows = []
     grouped = defaultdict(lambda: defaultdict(list))
 
