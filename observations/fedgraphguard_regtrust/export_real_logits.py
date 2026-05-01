@@ -56,7 +56,12 @@ def _train_one_client(model, loader, device, epochs=1):
                 continue
             x, y = x.to(device), y.to(device)
             opt.zero_grad()
-            loss = F.cross_entropy(model(x), y)
+            try:
+                loss = F.cross_entropy(model(x), y)
+            except ValueError as e:
+                if "Expected more than 1 value per channel" in str(e):
+                    continue
+                raise
             loss.backward()
             opt.step()
 
