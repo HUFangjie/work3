@@ -69,9 +69,18 @@ def resolve_input_file(path_str: str) -> Path:
         if c.exists() and c.is_file():
             return c
 
+    # Fallback: search by basename under project observations tree (helps when old runs wrote nested paths).
+    root = find_project_root()
+    matches = sorted((root / "observations").rglob(Path(path_str).name))
+    file_matches = [m for m in matches if m.is_file()]
+    if len(file_matches) == 1:
+        print(f"[Obs1] logits file not found at requested path; fallback to discovered file: {file_matches[0]}")
+        return file_matches[0]
+
     raise FileNotFoundError(
         "Input logits npz not found.\n"
         f"Requested: {path_str}\n"
         f"Current working directory: {Path.cwd()}\n"
-        "Candidates tried:\n  - " + "\n  - ".join(str(x) for x in cands)
+        "Candidates tried:\n  - " + "\n  - ".join(str(x) for x in cands) +
+        ("\nDiscovered candidates under observations/:\n  - " + "\n  - ".join(str(x) for x in file_matches[:20]) if file_matches else "")
     )
