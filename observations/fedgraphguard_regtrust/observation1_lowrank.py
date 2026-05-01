@@ -7,8 +7,16 @@ from pathlib import Path
 
 import numpy as np
 
-from .obs_utils import ensure_dir, make_run_id, parse_obs1_key, save_json
-from .plotting import plot_obs1_cumulative_energy_grid
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir
+    from plotting import plot_obs1_cumulative_energy_grid
+else:
+    from .obs_utils import make_run_id, parse_obs1_key, save_json, resolve_out_dir
+    from .plotting import plot_obs1_cumulative_energy_grid
 
 
 def jaccard_from_logits(arr: np.ndarray, kappa: int) -> np.ndarray:
@@ -35,6 +43,7 @@ def main():
     args = p.parse_args()
 
     out_dir = resolve_out_dir(args.out_dir)
+    print(f"[Obs1] resolved output dir = {out_dir}")
     run_id = make_run_id(args.dataset, obs_name="obs1")
     csv_path = out_dir / f"{run_id}_metrics.csv"
     json_path = out_dir / f"{run_id}_metrics.json"
