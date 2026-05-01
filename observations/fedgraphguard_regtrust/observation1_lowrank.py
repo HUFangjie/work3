@@ -93,11 +93,13 @@ def main():
         w.writerows(rows)
 
     betas = sorted(grouped.keys())
-    modes = ["homogeneous", "heterogeneous"]
+    modes = sorted({row["model_mode"] for row in rows})
     curves = {}
     for b in betas:
         curves[b] = {}
         for m in modes:
+            if len(grouped[b][m]) == 0:
+                continue
             mat = np.stack(grouped[b][m], axis=0)
             curves[b][m] = {"mean": mat.mean(axis=0), "std": mat.std(axis=0)}
 

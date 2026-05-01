@@ -14,16 +14,21 @@ def plot_obs1_cumulative_energy_grid(grouped_curves, betas, model_modes, dataset
 
     for i, beta in enumerate(betas):
         ax = axes[i]
+        last_len = None
         for mode in model_modes:
+            if mode not in grouped_curves[beta]:
+                continue
             mean = grouped_curves[beta][mode]["mean"]
             std = grouped_curves[beta][mode]["std"]
             x = np.arange(1, len(mean) + 1)
-            ax.plot(x, mean, label=mode.capitalize(), color=colors[mode], lw=2)
-            ax.fill_between(x, np.clip(mean - std, 0, 1), np.clip(mean + std, 0, 1), color=colors[mode], alpha=0.2)
+            last_len = len(mean)
+            ax.plot(x, mean, label=mode.capitalize(), color=colors.get(mode, "tab:blue"), lw=2)
+            ax.fill_between(x, np.clip(mean - std, 0, 1), np.clip(mean + std, 0, 1), color=colors.get(mode, "tab:blue"), alpha=0.2)
         ax.axhline(0.90, ls="--", color="gray", lw=1.2)
         ax.set_title(f"( {chr(ord('a')+i)} ) Dirichlet beta = {beta}")
         ax.set_ylim(y_min, y_max)
-        ax.set_xlim(1, len(mean))
+        if last_len is not None:
+            ax.set_xlim(1, last_len)
         ax.set_xlabel("Rank r")
         ax.set_ylabel("Cumulative spectral energy")
 
