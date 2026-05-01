@@ -14,11 +14,11 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent))
     from obs_datasets import get_dataset
     from obs_model_factory import assign_architectures, build_model
-    from obs_utils import ensure_dir, make_run_id, save_json
+    from obs_utils import make_run_id, save_json, resolve_out_dir
 else:
     from .obs_datasets import get_dataset
     from .obs_model_factory import assign_architectures, build_model
-    from .obs_utils import ensure_dir, make_run_id, save_json
+    from .obs_utils import make_run_id, save_json, resolve_out_dir
 
 import numpy as np
 import torch
@@ -100,7 +100,8 @@ def main():
         return
     labels = _collect_labels(ds)
 
-    out_dir = ensure_dir(args.out_dir)
+    out_dir = resolve_out_dir(args.out_dir)
+    print(f"[Obs1] resolved output dir = {out_dir}")
     run_id = make_run_id(args.dataset, obs_name="obs1")
     npz_path = out_dir / f"{run_id}_logits.npz"
     meta_path = out_dir / f"{run_id}_metadata.json"

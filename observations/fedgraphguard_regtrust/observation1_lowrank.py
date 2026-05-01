@@ -34,7 +34,7 @@ def main():
     p.add_argument("--kappa", type=int, default=5)
     args = p.parse_args()
 
-    out_dir = ensure_dir(args.out_dir)
+    out_dir = resolve_out_dir(args.out_dir)
     run_id = make_run_id(args.dataset, obs_name="obs1")
     csv_path = out_dir / f"{run_id}_metrics.csv"
     json_path = out_dir / f"{run_id}_metrics.json"

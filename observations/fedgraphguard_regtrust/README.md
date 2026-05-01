@@ -76,3 +76,6 @@ python -m observations.fedgraphguard_regtrust.export_real_logits \
   --data-root analysis/data \
   --check-data-only
 ```
+
+
+> Note: Replace `<generated_logits_file>.npz` with the real filename. Do not type angle brackets (`<` `>`).

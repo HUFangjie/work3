@@ -36,3 +36,19 @@ def parse_obs1_key(key: str) -> Dict[str, str]:
 
 def save_json(path: Path, obj: Dict) -> None:
     path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+def find_project_root() -> Path:
+    cur = Path.cwd().resolve()
+    for p in [cur, *cur.parents, Path(__file__).resolve().parent, *Path(__file__).resolve().parents]:
+        if (p / "observations").exists() and (p / "analysis").exists():
+            return p
+    return cur
+
+
+def resolve_out_dir(path_str: str) -> Path:
+    p = Path(path_str)
+    if p.is_absolute():
+        return ensure_dir(p)
+    root = find_project_root()
+    return ensure_dir((root / p).resolve())
