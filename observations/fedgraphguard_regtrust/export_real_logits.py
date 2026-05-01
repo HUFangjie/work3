@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from pathlib import Path
 from typing import Dict, List
+
+_omp = os.environ.get("OMP_NUM_THREADS", "").strip()
+if (not _omp.isdigit()) or int(_omp) <= 0:
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from obs_datasets import get_dataset
+    from obs_model_factory import assign_architectures, build_model
+    from obs_utils import ensure_dir, make_run_id, save_json
+else:
+    from .obs_datasets import get_dataset
+    from .obs_model_factory import assign_architectures, build_model
+    from .obs_utils import ensure_dir, make_run_id, save_json
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
-
-from .obs_datasets import get_dataset
-from .obs_model_factory import assign_architectures, build_model
-from .obs_utils import ensure_dir, make_run_id, save_json
-
 
 def dirichlet_partition(labels: np.ndarray, num_clients: int, beta: float, seed: int) -> List[np.ndarray]:
     rng = np.random.default_rng(seed)

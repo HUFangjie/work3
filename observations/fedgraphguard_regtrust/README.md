@@ -60,3 +60,10 @@ Outputs (unique run id):
 - CIFAR-10 is the main-text figure.
 - MNIST and Tiny-ImageNet can be exported/analyzed with same commands for appendix figures.
 - Dirichlet parameter is named **beta** consistently.
+
+
+## Troubleshooting
+- If you run script directly and see `attempted relative import with no known parent package`, use either:
+  - `python -m observations.fedgraphguard_regtrust.export_real_logits ...`
+  - or `cd observations/fedgraphguard_regtrust && python export_real_logits.py ...`
+- If you see `libgomp: Invalid value for environment variable OMP_NUM_THREADS`, exporter will auto-fallback to `OMP_NUM_THREADS=1`.
