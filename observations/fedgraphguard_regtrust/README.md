@@ -67,3 +67,12 @@ Outputs (unique run id):
   - `python -m observations.fedgraphguard_regtrust.export_real_logits ...`
   - or `cd observations/fedgraphguard_regtrust && python export_real_logits.py ...`
 - If you see `libgomp: Invalid value for environment variable OMP_NUM_THREADS`, exporter will auto-fallback to `OMP_NUM_THREADS=1`.
+
+
+### Quick data-path check (no training)
+```bash
+python -m observations.fedgraphguard_regtrust.export_real_logits \
+  --dataset cifar10 \
+  --data-root analysis/data \
+  --check-data-only
+```

@@ -80,10 +80,24 @@ def main():
     p.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--local-epochs", type=int, default=1)
+    p.add_argument("--check-data-only", action="store_true")
     args = p.parse_args()
 
     device = torch.device(args.device)
-    ds, num_classes, in_ch, _ = get_dataset(args.dataset, args.data_root)
+    print(f"[Obs1] dataset = {args.dataset}")
+    print(f"[Obs1] requested data_root = {args.data_root}")
+    print(f"[Obs1] output dir = {args.out_dir}")
+    print("[Obs1] download = disabled")
+
+    ds, num_classes, in_ch, _, resolved_root = get_dataset(args.dataset, args.data_root)
+    print(f"[Obs1] resolved data_root = {resolved_root}")
+    print(f"[Data] num_samples = {len(ds)}")
+    print(f"[Data] num_classes = {num_classes}")
+    print(f"[Data] input_channels = {in_ch}")
+
+    if args.check_data_only:
+        print("[Obs1] check-data-only passed.")
+        return
     labels = _collect_labels(ds)
 
     out_dir = ensure_dir(args.out_dir)
