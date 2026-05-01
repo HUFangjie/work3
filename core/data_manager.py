@@ -88,6 +88,7 @@ class DataManager:
                 data_root=self.data_root,
                 train_transform=train_transform,
                 test_transform=test_transform,
+                download=bool(data_cfg.get("download", True)),
             )
         elif self.dataset_name in ["pathmnist", "path-mnist"]:
             train_transform, test_transform = get_pathmnist_transforms(image_size=28)

@@ -17,6 +17,7 @@ def get_cifar10_datasets(
     data_root: str,
     train_transform: Compose,
     test_transform: Compose,
+    download: bool = True,
 ) -> Tuple[datasets.CIFAR10, datasets.CIFAR10]:
     """
     Load CIFAR-10 train and test datasets.
@@ -32,14 +33,14 @@ def get_cifar10_datasets(
     train_dataset = datasets.CIFAR10(
         root=data_root,
         train=True,
-        download=True,
+        download=download,
         transform=train_transform,
     )
 
     test_dataset = datasets.CIFAR10(
         root=data_root,
         train=False,
-        download=True,
+        download=download,
         transform=test_transform,
     )
 
