@@ -80,3 +80,16 @@ python -m observations.fedgraphguard_regtrust.export_real_logits \
 
 
 > Note: Replace `<generated_logits_file>.npz` with the real filename. Do not type angle brackets (`<` `>`).
+
+
+## Observation-2 standalone pipeline
+
+Export benign logits for Observation-2 (one `.npy` per config):
+```bash
+python -m observations.fedgraphguard_regtrust.observation2_export_real_logits   --dataset cifar10 --data-root analysis/data --out-dir observations/real_inputs/obs2   --num-clients 10 --num-public 1000 --betas 0.3 0.5 0.7 1.0   --model-modes homogeneous heterogeneous --seeds 0 1 2 --local-epochs 10 --device cuda
+```
+
+Plot Observation-2 for one exported `.npy`:
+```bash
+python -m observations.fedgraphguard_regtrust.plot_observation2   --logits-npy observations/real_inputs/obs2/obs2_logits_dataset_cifar10_mode_heterogeneous_beta_0.5_seed_0.npy   --out-dir observations/outputs/obs2 --kappa 5 --byzantine-ids 0 1 --attack alie
+```
