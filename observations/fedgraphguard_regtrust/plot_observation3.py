@@ -354,7 +354,19 @@ def main() -> None:
 
         degree_before = node_strength(S_graph)
         degree_after = node_strength(L_hat)
-        trust, history = personalized_pagerank(L_hat, beta=args.ppr_beta, seed=None, tol=args.eps, max_iter=200, return_history=args.plot_convergence)
+        ppr_out = personalized_pagerank(
+            L_hat,
+            beta=args.ppr_beta,
+            seed=None,
+            tol=args.eps,
+            max_iter=200,
+            return_history=args.plot_convergence,
+        )
+        if args.plot_convergence:
+            trust, history = ppr_out
+        else:
+            trust = ppr_out
+            history = None
 
         conn_before = connectivity_stats(S_graph, benign_ids, byz_ids)
         conn_after = connectivity_stats(L_hat, benign_ids, byz_ids)
