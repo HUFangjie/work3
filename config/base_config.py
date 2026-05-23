@@ -97,6 +97,11 @@ BASE_CONFIG: Dict[str, Any] = {
             "use_hard_target": True,
             "target_logit": 10.0,
             "non_target_logit": -10.0,
+            "fixed_target_offset": 1,  # target = (source + offset) % K
+            "amplitude_scale": 1.5,    # dynamic scaling from original logit range
+            "amplitude_bias": 0.5,     # additive boost on amplitude
+            "min_amplitude": 2.0,      # lower bound for malicious confidence
+            "mix_with_original": 0.2,  # keep soft structure for KD gradients
         },
         "topk": {
         "k": 3,

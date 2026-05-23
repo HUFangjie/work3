@@ -1,10 +1,11 @@
 # attacks/label_flip_attack.py
-"""Label-flip attack in logit space.
+"""Label-flip attack with stronger FD poisoning.
 
-This attack supports two modes:
-1) If ``y_public`` is available, perform *true* label flipping against those
-   labels by constructing targeted logits for wrong classes.
-2) Otherwise, fallback to a class-dimension permutation (roll).
+For malicious clients:
+- private training: flip labels (classic local label-poisoning).
+- public uplink logits: perform directed target flipping, using `y_public` when
+  available; otherwise use model top-1 pseudo labels and flip to a fixed wrong
+  direction. Forged logits are scaled from the original logit amplitude.
 """
 
 from __future__ import annotations
@@ -37,6 +38,11 @@ class LabelFlipAttack(BaseAttack):
         self.target_logit = float(lf_cfg.get("target_logit", 10.0))
         self.non_target_logit = float(lf_cfg.get("non_target_logit", -10.0))
         self.use_hard_target = bool(lf_cfg.get("use_hard_target", True))
+        self.fixed_target_offset = int(lf_cfg.get("fixed_target_offset", 1))
+        self.amplitude_scale = float(lf_cfg.get("amplitude_scale", 1.5))
+        self.amplitude_bias = float(lf_cfg.get("amplitude_bias", 0.5))
+        self.min_amplitude = float(lf_cfg.get("min_amplitude", 2.0))
+        self.mix_with_original = float(lf_cfg.get("mix_with_original", 0.2))
 
     def attack_private_labels(
         self,
@@ -85,20 +91,33 @@ class LabelFlipAttack(BaseAttack):
         else:
             flip_mask = (torch.rand(logits.shape[0], device=logits.device) < self.flip_probability)
 
-        # 如果拿到了真实标签，做“标签翻转”而不是单纯滚动通道
+        # Target source: real public label if available; otherwise top-1 pseudo label.
         if y_public is not None:
-            y = y_public.to(logits.device).long().view(-1)
-            y = y[: logits.shape[0]]
-            target = (y + 1) % num_classes
-            if self.use_hard_target:
-                forged = torch.full_like(logits, self.non_target_logit)
-                forged.scatter_(1, target.unsqueeze(1), self.target_logit)
-            else:
-                forged = torch.roll(logits, shifts=1, dims=-1)
-            adv_logits[flip_mask] = forged[flip_mask]
-            return adv_logits
+            src = y_public.to(logits.device).long().view(-1)[: logits.shape[0]]
+        else:
+            src = torch.argmax(logits, dim=-1)
 
-        # 没有标签时 fallback 到固定置换
-        rolled = torch.roll(logits, shifts=1, dims=-1)
-        adv_logits[flip_mask] = rolled[flip_mask]
+        offset = self.fixed_target_offset % max(1, num_classes)
+        if offset == 0:
+            offset = 1
+        target = (src + offset) % num_classes
+
+        # Dynamic amplitude from current logits (avoid static +10/-10).
+        # Use per-sample range so forged logits stay adaptive but strong.
+        row_max = logits.max(dim=1, keepdim=True).values
+        row_min = logits.min(dim=1, keepdim=True).values
+        row_amp = (row_max - row_min).clamp(min=1e-6)
+        amp = (row_amp * self.amplitude_scale + self.amplitude_bias).clamp(min=self.min_amplitude)
+
+        if self.use_hard_target:
+            forged = torch.full_like(logits, 0.0)
+            forged = forged - amp
+            forged.scatter_(1, target.unsqueeze(1), amp)
+            if self.mix_with_original > 0.0:
+                mix = max(0.0, min(1.0, self.mix_with_original))
+                forged = (1.0 - mix) * forged + mix * logits
+        else:
+            forged = torch.roll(logits, shifts=offset, dims=-1)
+
+        adv_logits[flip_mask] = forged[flip_mask]
         return adv_logits
