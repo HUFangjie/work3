@@ -17,6 +17,13 @@ from attacks.base_attack import BaseAttack
 
 
 class LabelFlipAttack(BaseAttack):
+    """Classic label-flip attack.
+
+    Core behavior:
+    - On private supervised training, malicious clients replace true labels
+      with wrong labels (cyclic mapping by default): y -> (y + 1) % K.
+    - Logit attack path is kept for FD uplink poisoning compatibility.
+    """
     def __init__(
         self,
         is_malicious: bool,
@@ -30,6 +37,29 @@ class LabelFlipAttack(BaseAttack):
         self.target_logit = float(lf_cfg.get("target_logit", 10.0))
         self.non_target_logit = float(lf_cfg.get("non_target_logit", -10.0))
         self.use_hard_target = bool(lf_cfg.get("use_hard_target", True))
+
+    def attack_private_labels(
+        self,
+        y: torch.Tensor,
+        num_classes: Optional[int] = None,
+    ) -> torch.Tensor:
+        if (not self.is_malicious) or self.flip_probability <= 0.0:
+            return y
+
+        y_flat = y.long().view(-1)
+        if num_classes is None:
+            if y_flat.numel() == 0:
+                return y
+            num_classes = int(torch.max(y_flat).item()) + 1
+
+        if self.flip_probability >= 1.0:
+            mask = torch.ones_like(y_flat, dtype=torch.bool)
+        else:
+            mask = torch.rand(y_flat.shape[0], device=y_flat.device) < self.flip_probability
+
+        y_adv = y_flat.clone()
+        y_adv[mask] = (y_adv[mask] + 1) % int(num_classes)
+        return y_adv.view_as(y)
 
     def attack_logits(
         self,

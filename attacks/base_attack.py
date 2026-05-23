@@ -70,3 +70,15 @@ class BaseAttack:
             adv_logits: adversarial logits (same shape as logits).
         """
         return logits
+
+    def attack_private_labels(
+        self,
+        y: torch.Tensor,
+        num_classes: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Default private-label attack: identity.
+
+        This hook enables attacks that poison local supervised training
+        (e.g., classic label-flip) by modifying private labels before CE loss.
+        """
+        return y
