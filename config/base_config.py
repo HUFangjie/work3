@@ -94,6 +94,9 @@ BASE_CONFIG: Dict[str, Any] = {
         # Label flip / targeted attack (baseline)
         "label_flip": {
             "flip_probability": 0.5,
+            "use_hard_target": True,
+            "target_logit": 10.0,
+            "non_target_logit": -10.0,
         },
         "topk": {
         "k": 3,
