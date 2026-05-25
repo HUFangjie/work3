@@ -176,6 +176,29 @@ def compute_ks_confidence_correct_vs_error_from_raw(
     return float(np.max(np.abs(cdf_correct - cdf_error)))
 
 
+def compute_aurc_from_raw(
+    confidences: torch.Tensor,
+    correctness: torch.Tensor,
+) -> float:
+    """Compute AURC (Area Under Risk-Coverage curve).
+
+    Coverage increases as we accept samples from high to low confidence.
+    Risk at each coverage is cumulative error rate among accepted samples.
+    """
+    conf = confidences.view(-1).float()
+    corr = correctness.view(-1).float()
+    n = int(conf.numel())
+    if n == 0:
+        return 0.0
+
+    order = torch.argsort(conf, descending=True)
+    err = (1.0 - corr[order]).float()
+    cum_err = torch.cumsum(err, dim=0)
+    k = torch.arange(1, n + 1, device=conf.device, dtype=torch.float32)
+    risk = cum_err / k
+    return float(risk.mean().item())
+
+
 # ----------------------------------------------------------------------
 # NEW: one-pass eval that also returns raw reliability data
 # ----------------------------------------------------------------------
@@ -285,6 +308,7 @@ def evaluate_with_calibration_and_raw(
     conf_np = conf_all.numpy().astype(np.float32)
     corr_np = corr_all.numpy().astype(np.int64)
     ks = compute_ks_confidence_correct_vs_error_from_raw(conf_np, corr_np)
+    aurc = compute_aurc_from_raw(conf_all.to(device), corr_all.to(device))
 
     metrics = {
         "loss": float(total_loss / float(total_samples)),
@@ -295,6 +319,7 @@ def evaluate_with_calibration_and_raw(
         "coe": float(coe),
         "avg_confidence": float(avg_conf),
         "ks_confidence": float(ks),
+        "aurc": float(aurc),
     }
 
     raw = {

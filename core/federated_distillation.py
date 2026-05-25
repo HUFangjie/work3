@@ -134,6 +134,7 @@ def _init_metrics_csv_if_needed(csv_path: str) -> None:
         "test_coe",
         "test_ece",
         "test_ks",
+        "test_aurc",
     ]
 
     if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
@@ -142,28 +143,32 @@ def _init_metrics_csv_if_needed(csv_path: str) -> None:
                 reader = csv.reader(f)
                 old_header = next(reader, None)
                 old_rows = list(reader)
-            if old_header is not None and "test_coe" not in old_header:
-                # Upgrade: insert test_coe after test_avg_conf
-                try:
-                    insert_pos = old_header.index("test_avg_conf") + 1
-                except Exception:
-                    insert_pos = min(4, len(old_header))
+            need_upgrade = (old_header is not None) and (
+                ("test_coe" not in old_header) or ("test_aurc" not in old_header)
+            )
+            if need_upgrade:
+                idx = {k: i for i, k in enumerate(old_header)}
                 new_rows = []
                 for r in old_rows:
-                    r2 = list(r)
-                    if len(r2) < insert_pos:
-                        r2 += [""] * (insert_pos - len(r2))
-                    r2.insert(insert_pos, "nan")
-                    new_rows.append(r2)
-
+                    def getv(name: str, default: str = "nan") -> str:
+                        i = idx.get(name, None)
+                        if i is None or i >= len(r):
+                            return default
+                        return r[i]
+                    new_rows.append([
+                        getv("round", "0"),
+                        getv("test_loss", "nan"),
+                        getv("test_accuracy", "nan"),
+                        getv("test_avg_conf", "nan"),
+                        getv("test_coe", "nan"),
+                        getv("test_ece", "nan"),
+                        getv("test_ks", "nan"),
+                        getv("test_aurc", "nan"),
+                    ])
                 with open(csv_path, "w", newline="") as f:
                     writer = csv.writer(f)
                     writer.writerow(header)
-                    for r in new_rows:
-                        # pad / trim to header length
-                        rr = list(r)[: len(header)] + [""] * max(0, len(header) - len(r))
-                        writer.writerow(rr)
-            # else: already upgraded, keep as-is
+                    writer.writerows(new_rows)
             return
         except Exception:
             # fall through to re-init
@@ -190,6 +195,7 @@ def _append_round_metrics(
         float(test_metrics.get("confidence_on_error", float("nan"))),
         test_metrics.get("ece", 0.0),
         test_metrics.get("ks_confidence", 0.0),
+        test_metrics.get("aurc", float("nan")),
     ]
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
@@ -215,6 +221,37 @@ def _append_round_stealth(
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([round_idx, teacher_entropy_mean, stealth_w1_teacher, history_size, malicious_clients])
+
+
+def _save_tail20_aurc_summary(config: Dict, csv_path: str) -> None:
+    """Compute and save avg AURC over last 20% rounds from metrics CSV."""
+    rows = []
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            try:
+                rnd = int(float(r.get("round", "0")))
+                aurc = float(r.get("test_aurc", "nan"))
+            except Exception:
+                continue
+            if np.isfinite(aurc):
+                rows.append((rnd, aurc))
+    if len(rows) == 0:
+        return
+    rows = sorted(rows, key=lambda x: x[0])
+    n = len(rows)
+    tail_n = max(1, int(np.ceil(0.2 * n)))
+    tail = rows[-tail_n:]
+    tail_avg = float(np.mean([x[1] for x in tail]))
+
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    exp_name = log_cfg.get("exp_name", "debug_run")
+    out_path = os.path.join(log_dir, f"{exp_name}_aurc_tail20.csv")
+    with open(out_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["exp_name", "num_eval_points", "tail20_points", "tail20_start_round", "tail20_end_round", "tail20_avg_aurc"])
+        w.writerow([exp_name, n, tail_n, tail[0][0], tail[-1][0], f"{tail_avg:.10f}"])
 
 
 def _init_client_overhead_csv_if_needed(csv_path: str) -> None:
@@ -686,6 +723,7 @@ def run_federated_distillation(
             writer.add_scalar("test/avg_confidence", test_metrics["avg_confidence"], round_idx)
             writer.add_scalar("test/confidence_on_error", test_metrics.get("confidence_on_error", float("nan")), round_idx)
             writer.add_scalar("test/ks_confidence", test_metrics["ks_confidence"], round_idx)
+            writer.add_scalar("test/aurc", test_metrics.get("aurc", float("nan")), round_idx)
 
             _append_round_metrics(metrics_csv_path, round_idx, test_metrics)
 
@@ -699,4 +737,5 @@ def run_federated_distillation(
             )
             logger.info(f"[ReliabilityDump] saved: {saved_path}")
 
+    _save_tail20_aurc_summary(config=config, csv_path=metrics_csv_path)
     logger.info("Federated distillation completed.")
