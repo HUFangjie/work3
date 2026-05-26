@@ -118,6 +118,9 @@ BASE_CONFIG: Dict[str, Any] = {
         "normalize": True,
         "norm_low": -10.0,
         "norm_high": 10.0,
+        "rank_weighted": True,      # stronger suppression on top-1 than top-2/3
+        "promote_non_top1": True,   # actively boost a non-top1 target class
+        "promote_strength": 0.8,    # boost magnitude coefficient
         },
         "impersonation": {
         # no hyperparams needed in the paper's definition
