@@ -89,6 +89,15 @@ BASE_CONFIG: Dict[str, Any] = {
         # Gaussian logit attack (baseline)
         "gaussian": {
             "sigma": 0.1,
+            "mode": "targeted_mean_shift",  # ["targeted_mean_shift","max_prediction_masking"]
+            "scale_with_span": True,
+            "span_scale": 0.35,
+            "span_bias": 0.10,
+            "min_scale": 0.5,
+            "max_scale": None,
+            "target_offset": 1,
+            "mask_strength": 1.0,
+            "mix_with_original": 0.15,
         },
 
         # Label flip / targeted attack (baseline)
