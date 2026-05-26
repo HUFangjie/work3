@@ -132,11 +132,12 @@ BASE_CONFIG: Dict[str, Any] = {
             "max_abs_logit": None,
         },
         "manipulating_kd": {
-            "gamma": 0.5,         # margin adjust factor
-            "min_margin": 1e-3,
-            "max_margin": 50.0,
-            "l2_budget": None,    # optional per-sample L2 budget on delta logits
-            "seed": 1234,
+            "temperature": 1.2,       # >1 keeps uncertainty, improves stealth
+            "transfer_mass": 0.20,    # move prob mass from pred -> wrong target
+            "target_offset": 1,       # target = (pred + offset) % K
+            "entropy_floor_ratio": 0.35,  # mix with benign probs to avoid entropy collapse
+            "min_prob": 1e-4,         # tail floor before log
+            "eps": 1e-8,
         },
         "fed_ace": {
             "tau": 0.7,           # confidence threshold
