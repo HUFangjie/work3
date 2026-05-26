@@ -80,7 +80,7 @@ class TopKLogitAttack(BaseAttack):
         if self.rank_weighted:
             # strongest suppression on top-1, weaker on lower ranks
             rank_w = torch.linspace(1.0, 0.35, steps=k, device=adv.device, dtype=adv.dtype).unsqueeze(0)  # [1,k]
-            penalties = self.delta * rank_w  # self.delta is usually negative
+            penalties = (self.delta * rank_w).expand_as(idx).contiguous()  # [B,k], self.delta is usually negative
         else:
             penalties = torch.full_like(topv, self.delta)
         adv.scatter_add_(dim=-1, index=idx, src=penalties)
