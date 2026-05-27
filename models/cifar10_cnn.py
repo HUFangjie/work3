@@ -1,100 +1,75 @@
 # models/cifar10_cnn.py
 """
-Residual-VGG style CNN for CIFAR-10 (32x32 RGB).
+Modernized CIFAR-10 CNN (ResNet-style) for 32x32 RGB.
 
-- 通道规模与原始版本保持一致：64 -> 128 -> 256（可用 width_mult 缩放）
-- 每个 block 内加入轻量残差 BasicBlock，提升梯度稳定性和收敛速度
-- 结构仍然是 3 个 block + 3 次 2x2 池化 -> 4x4，再接全连接 512 -> num_classes
+Design goals:
+- Stronger feature extractor than plain VGG-like stack.
+- Stable optimization with BN + residual connections.
+- Parameter-efficient head via global average pooling (reduces overfitting).
 """
 
-from typing import Optional
+from __future__ import annotations
+
+from typing import Callable
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class ResidualBlock(nn.Module):
-    """
-    2 层 3x3 Conv + BN 的 BasicBlock，带可选 dropout 和 1x1 shortcut。
-
-    Args:
-        in_channels: 输入通道数
-        out_channels: 输出通道数
-        stride: 第一层卷积的 stride（这里我们都用 stride=1）
-        dropout: Dropout prob（针对中间特征做 Dropout2d）
-    """
+class BasicBlock(nn.Module):
+    expansion = 1
 
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
+        in_ch: int,
+        out_ch: int,
         stride: int = 1,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_ch)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_ch)
+        self.drop = nn.Dropout2d(dropout) if dropout > 0.0 else nn.Identity()
 
-        self.conv1 = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=3,
-            stride=stride,
-            padding=1,
-            bias=False,
-        )
-        self.bn1 = nn.BatchNorm2d(out_channels)
-
-        self.conv2 = nn.Conv2d(
-            out_channels,
-            out_channels,
-            kernel_size=3,
-            stride=1,
-            padding=1,
-            bias=False,
-        )
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.dropout = nn.Dropout2d(dropout) if dropout > 0.0 else nn.Identity()
-
-        # 如果通道数变化，或者 stride != 1，则用 1x1 conv 做 shortcut
-        if stride != 1 or in_channels != out_channels:
+        if stride != 1 or in_ch != out_ch:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(out_channels),
+                nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_ch),
             )
         else:
             self.shortcut = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = F.relu(out, inplace=True)
-
-        out = self.dropout(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
+        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = self.drop(out)
+        out = self.bn2(self.conv2(out))
         out = out + self.shortcut(x)
-        out = F.relu(out, inplace=True)
-        return out
+        return F.relu(out, inplace=True)
+
+
+def _make_stage(
+    in_ch: int,
+    out_ch: int,
+    num_blocks: int,
+    first_stride: int,
+    dropout: float,
+) -> nn.Sequential:
+    blocks = [BasicBlock(in_ch, out_ch, stride=first_stride, dropout=dropout)]
+    for _ in range(1, num_blocks):
+        blocks.append(BasicBlock(out_ch, out_ch, stride=1, dropout=dropout))
+    return nn.Sequential(*blocks)
 
 
 class CIFAR10CNN(nn.Module):
     """
-    Residual-VGG style CNN for CIFAR-10.
-
-    Args:
-        input_channels: 输入通道数（CIFAR-10 为 3）
-        num_classes: 类别数（CIFAR-10 为 10）
-        width_mult: 通道宽度缩放系数（例如 0.75 / 1.0 / 1.25）
-        dropout: block 内部特征的 Dropout prob（典型 0.0–0.3）
+    ResNet-20-like backbone tailored for CIFAR-10:
+      stem(3->64) -> stage1(64, 3 blocks) ->
+      stage2(128, 3 blocks, downsample) ->
+      stage3(256, 3 blocks, downsample) ->
+      GAP -> FC(num_classes)
     """
 
     def __init__(
@@ -107,76 +82,37 @@ class CIFAR10CNN(nn.Module):
         super().__init__()
 
         def c(ch: int) -> int:
-            # 通道缩放工具
-            return max(1, int(ch * width_mult))
+            return max(8, int(ch * width_mult))
 
-        # --- Block 1: 3x32x32 -> 64x32x32 -> 64x16x16 ---
-        self.conv1_in = nn.Conv2d(
-            input_channels,
-            c(64),
-            kernel_size=3,
-            stride=1,
-            padding=1,
-            bias=False,
-        )
-        self.bn1_in = nn.BatchNorm2d(c(64))
-        # 残差部分保持 64 通道
-        self.block1 = ResidualBlock(
-            in_channels=c(64),
-            out_channels=c(64),
-            stride=1,
-            dropout=dropout,
+        c1, c2, c3 = c(64), c(128), c(256)
+
+        self.stem = nn.Sequential(
+            nn.Conv2d(input_channels, c1, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(c1),
+            nn.ReLU(inplace=True),
         )
 
-        # --- Block 2: 64x16x16 -> 128x16x16 -> 128x8x8 ---
-        self.block2 = ResidualBlock(
-            in_channels=c(64),
-            out_channels=c(128),
-            stride=1,
-            dropout=dropout,
-        )
+        self.stage1 = _make_stage(c1, c1, num_blocks=3, first_stride=1, dropout=dropout)
+        self.stage2 = _make_stage(c1, c2, num_blocks=3, first_stride=2, dropout=dropout)  # 32 -> 16
+        self.stage3 = _make_stage(c2, c3, num_blocks=3, first_stride=2, dropout=dropout)  # 16 -> 8
 
-        # --- Block 3: 128x8x8 -> 256x8x8 -> 256x4x4 ---
-        self.block3 = ResidualBlock(
-            in_channels=c(128),
-            out_channels=c(256),
-            stride=1,
-            dropout=dropout,
-        )
-
-        # 三次 2x2 池化：32 -> 16 -> 8 -> 4
-        flatten_dim = c(256) * 4 * 4
-
-        self.fc1 = nn.Linear(flatten_dim, c(512))
-        self.fc2 = nn.Linear(c(512), num_classes)
-
-        self.dropout = nn.Dropout(dropout)
+        self.head_drop = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
+        self.fc = nn.Linear(c3, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Stem conv: 3 -> 64, 32x32
-        x = F.relu(self.bn1_in(self.conv1_in(x)), inplace=True)
-
-        # Block 1 + pool: 32 -> 16
-        x = self.block1(x)
-        x = F.max_pool2d(x, 2)  # 32 -> 16
-
-        # Block 2 + pool: 16 -> 8
-        x = self.block2(x)
-        x = F.max_pool2d(x, 2)  # 16 -> 8
-
-        # Block 3 + pool: 8 -> 4
-        x = self.block3(x)
-        x = F.max_pool2d(x, 2)  # 8 -> 4
-
-        x = x.view(x.size(0), -1)
-        x = self.dropout(F.relu(self.fc1(x), inplace=True))
-        logits = self.fc2(x)
-        return logits
+        x = self.stem(x)
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = F.adaptive_avg_pool2d(x, output_size=1)
+        x = torch.flatten(x, 1)
+        x = self.head_drop(x)
+        return self.fc(x)
 
 
 if __name__ == "__main__":
-    # 简单自检
-    model = CIFAR10CNN()
-    x = torch.randn(8, 3, 32, 32)
-    y = model(x)
-    print("Output shape:", y.shape)  # 期望: [8, 10]
+    m = CIFAR10CNN()
+    t = torch.randn(4, 3, 32, 32)
+    y = m(t)
+    print(y.shape)  # [4, 10]
+
