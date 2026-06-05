@@ -1,0 +1,57 @@
+{
+  "seed": 42,
+  "device": "cuda",
+  "data_config": {
+    "dataset": "tiny_imagenet",
+    "data_root": "./data",
+    "num_clients": 10,
+    "public_ratio": 0.2,
+    "partition_type": "dirichlet",
+    "dirichlet_alpha": 1.0,
+    "batch_size_private": 96,
+    "batch_size_public": 96,
+    "num_workers": 8
+  },
+  "model_config": {
+    "name": "wrn28_8_tiny",
+    "num_classes": 200,
+    "input_channels": 3,
+    "dropout": 0.15
+  },
+  "fd_config": {
+    "offload_clients_to_cpu": true,
+    "public_logits_amp": true,
+    "public_logits_micro_bs": 48,
+    "uplink_logits_dtype": "float32",
+    "public_batches_per_round": 0,
+    "num_rounds": 400,
+    "clients_per_round": 10,
+    "local_epochs": 1,
+    "optimizer": "sgd",
+    "lr": 0.015,
+    "server_lr": 0.015,
+    "momentum": 0.9,
+    "weight_decay": 0.0005,
+    "kd_temperature": 3.0,
+    "kd_alpha": 1.0
+  },
+  "attack_config": {
+    "enabled": false,
+    "name": "none"
+  },
+  "defense_config": {
+    "enabled": false,
+    "name": "none"
+  },
+  "evaluation_config": {
+    "eval_every": 5,
+    "calibration_num_bins": 15
+  },
+  "logging_config": {
+    "log_dir": "./logs",
+    "exp_name": "tiny_imagenet_fd_wrn28_8_strong",
+    "save_checkpoint_every": 50,
+    "print_every": 1,
+    "use_tensorboard": true
+  }
+}
