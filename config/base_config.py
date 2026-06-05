@@ -18,27 +18,27 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Dataset & partitioning
     "data_config": {
-        "dataset": "cifar10",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
+        "dataset": "tiny_imagenet",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
         # "data_root": "./data/MedMNIST",
         "data_root": "./data",
         "num_clients": 10,
-        "public_ratio": 0.1,          # fraction of data reserved as public
+        "public_ratio": 0.2,          # fraction of data reserved as public
         "partition_type": "dirichlet",  # ["dirichlet", "shard", "label_separation"]
-        "dirichlet_alpha": 0.5,
+        "dirichlet_alpha": 1.0,
         "num_shards": 40,             # for shard partition
         "label_separation_classes_per_client": 2,  # for extreme Non-IID
-        "batch_size_private": 64,
-        "batch_size_public": 64,
+        "batch_size_private": 128,
+        "batch_size_public": 128,
         "num_workers": 8,
     },
 
     # Model configuration
     "model_config": {
-        "name": "cifar10_cnn",   # ["fmnist_cnn", "cifar10_cnn", "resnet18_tiny", "resnet50_tiny"；"resnet34_tiny"...]
-        "num_classes": 10,      # e.g., FEMNIST: 62 classes; CIFAR10: 10；"resnet18_tiny"：200；pathmnist:9
+        "name": "wrn28_4_tiny",   # ["fmnist_cnn", "cifar10_cnn", "wrn28_4_tiny", "wrn28_8_tiny", "resnet18_tiny", "resnet34_tiny"...]
+        "num_classes": 200,      # e.g., CIFAR10: 10; Tiny-ImageNet: 200; pathmnist: 9
         "input_channels": 3,    # FEMNIST: 1, CIFAR10: 3
         "width_mult": 1.0,
-        "dropout": 0.0,
+        "dropout": 0.1,
     },
 
     # Federated distillation protocol configuration
@@ -49,18 +49,19 @@ BASE_CONFIG: Dict[str, Any] = {
         # - public_logits_micro_bs: micro-batch for teacher inference on public data
         # - uplink_logits_dtype: cast uploaded logits on CPU to save memory/"communication"
         # - public_batches_per_round: limit public batches per round (0 => full epoch)
-        "public_logits_micro_bs": 32,
+        "public_logits_micro_bs": 64,
         "uplink_logits_dtype": "float32",  # {"float32","float16"}
         "public_batches_per_round": 0,
-        "num_rounds": 100,
+        "num_rounds": 400,
         "clients_per_round": 10,
-        "local_epochs": 3,
+        "local_epochs": 1,
         "optimizer": "sgd",
-        "lr": 1e-2,
+        "lr": 2e-2,
         "momentum": 0.9,
         "weight_decay": 5e-4,
+        "server_lr": 2e-2,
         # Knowledge distillation temperature
-        "kd_temperature": 1.0,
+        "kd_temperature": 3.0,
         # Coefficient for distillation loss vs. supervised loss (if any)
         "kd_alpha": 1.0,
     },
@@ -68,7 +69,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Attack configuration
     "attack_config": {
         "enabled": False,
-        "name": "fed_ace",  # ["none","t3","gaussian","label_flip","topk","impersonation","naive_sharpening","manipulating_kd","fed_ace","fed_oca"]
+        "name": "none",  # ["none","t3","gaussian","label_flip","topk","impersonation","naive_sharpening","manipulating_kd","fed_ace","fed_oca"]
         "malicious_client_fraction": 0.2,
         "fixed_malicious_clients": [0,1],  # list of client ids, or None
 
@@ -157,7 +158,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
         "none": {},
 
         "entropy_clip": {
@@ -198,14 +199,14 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Evaluation / calibration configuration (仅 ID 测试集相关)
     "evaluation_config": {
-        "eval_every": 1,              # evaluate every N rounds on val/test
+        "eval_every": 5,              # evaluate every N rounds on val/test
         "calibration_num_bins": 15,   # num bins for ECE / KS
     },
 
     # Logging / checkpointing
     "logging_config": {
         "log_dir": "./logs",
-        "exp_name": "debug_run",
+        "exp_name": "tiny_imagenet_wrn28_4_baseline",
         "save_checkpoint_every": 50,
         "print_every": 1,
         "use_tensorboard": True,
