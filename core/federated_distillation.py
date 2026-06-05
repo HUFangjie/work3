@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Dict, List, Any, Tuple
 from collections import deque
 import csv
+import math
 import os
 import time
 
@@ -377,6 +378,52 @@ def wasserstein_1d(a: torch.Tensor, b: torch.Tensor, quantiles: int = 256) -> fl
 # =========================================================
 # Attack / role helpers
 # =========================================================
+
+
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for group in optimizer.param_groups:
+        group["lr"] = float(lr)
+
+
+def _scheduled_lr(
+    fd_cfg: Dict[str, Any],
+    base_lr: float,
+    round_idx: int,
+    num_rounds: int,
+    min_lr_key: str = "lr_min",
+) -> float:
+    """Round-level LR schedule controlled by fd_config.
+
+    Supported:
+      - "none": keep base LR.
+      - "cosine": warmup + cosine decay to lr_min.
+      - "step": multiply by lr_gamma at each milestone in lr_milestones.
+    """
+    schedule = str(fd_cfg.get("lr_schedule", "none")).lower()
+    if schedule in ("", "none", "constant"):
+        return float(base_lr)
+
+    warmup_rounds = max(0, int(fd_cfg.get("lr_warmup_rounds", 0)))
+    warmup_factor = float(fd_cfg.get("lr_warmup_factor", 0.2))
+    if warmup_rounds > 0 and round_idx <= warmup_rounds:
+        alpha = float(round_idx) / float(max(1, warmup_rounds))
+        return float(base_lr) * (warmup_factor + (1.0 - warmup_factor) * alpha)
+
+    if schedule == "cosine":
+        min_lr = float(fd_cfg.get(min_lr_key, fd_cfg.get("lr_min", 1e-4)))
+        denom = max(1, num_rounds - warmup_rounds)
+        progress = min(1.0, max(0.0, (round_idx - warmup_rounds) / float(denom)))
+        return min_lr + 0.5 * (float(base_lr) - min_lr) * (1.0 + math.cos(math.pi * progress))
+
+    if schedule == "step":
+        gamma = float(fd_cfg.get("lr_gamma", 0.1))
+        milestones = [int(m) for m in fd_cfg.get("lr_milestones", [])]
+        drops = sum(1 for m in milestones if round_idx >= m)
+        return float(base_lr) * (gamma ** drops)
+
+    raise ValueError(f"Unsupported lr_schedule: {schedule}")
+
+
 def _needs_impersonation_attack(config: Dict) -> bool:
     attack_cfg = config.get("attack_config", {})
     if not bool(attack_cfg.get("enabled", False)):
@@ -481,6 +528,8 @@ def run_federated_distillation(
     aurc_round_records: List[Tuple[int, float]] = []
     eval_every = int(eval_cfg.get("eval_every", 5))
     calib_num_bins = int(eval_cfg.get("calibration_num_bins", 15))
+    base_client_lr = float(fd_cfg.get("lr", 0.01))
+    base_server_lr = float(fd_cfg.get("server_lr", base_client_lr))
 
     need_impersonation = _needs_impersonation_attack(config)
     if need_impersonation and (not _IMP_CTX_AVAILABLE):
@@ -491,6 +540,14 @@ def run_federated_distillation(
 
     for round_idx in range(1, num_rounds + 1):
         logger.info(f"=== Round {round_idx}/{num_rounds} ===")
+
+        client_lr = _scheduled_lr(fd_cfg, base_client_lr, round_idx, num_rounds, min_lr_key="lr_min")
+        server_lr = _scheduled_lr(fd_cfg, base_server_lr, round_idx, num_rounds, min_lr_key="server_lr_min")
+        for c in clients.values():
+            _set_optimizer_lr(c.optimizer, client_lr)
+        _set_optimizer_lr(server.optimizer, server_lr)
+        if round_idx == 1 or round_idx % max(1, eval_every) == 0:
+            logger.info(f"Round {round_idx}: lr(client)={client_lr:.6g}, lr(server)={server_lr:.6g}")
 
         # 1) Sample clients (teachers) for this round
         selected_clients: List[int] = list(

@@ -22,9 +22,9 @@ BASE_CONFIG: Dict[str, Any] = {
         # "data_root": "./data/MedMNIST",
         "data_root": "./data",
         "num_clients": 10,
-        "public_ratio": 0.2,          # fraction of data reserved as public
+        "public_ratio": 0.3,          # Tiny-ImageNet FD needs broad public coverage
         "partition_type": "dirichlet",  # ["dirichlet", "shard", "label_separation"]
-        "dirichlet_alpha": 1.0,
+        "dirichlet_alpha": 2.0,
         "num_shards": 40,             # for shard partition
         "label_separation_classes_per_client": 2,  # for extreme Non-IID
         "batch_size_private": 128,
@@ -54,14 +54,19 @@ BASE_CONFIG: Dict[str, Any] = {
         "public_batches_per_round": 0,
         "num_rounds": 400,
         "clients_per_round": 10,
-        "local_epochs": 1,
+        "local_epochs": 2,
         "optimizer": "sgd",
-        "lr": 2e-2,
+        "lr": 3e-2,
         "momentum": 0.9,
         "weight_decay": 5e-4,
         "server_lr": 2e-2,
+        "lr_schedule": "cosine",
+        "lr_warmup_rounds": 10,
+        "lr_warmup_factor": 0.2,
+        "lr_min": 1e-4,
+        "server_lr_min": 1e-4,
         # Knowledge distillation temperature
-        "kd_temperature": 3.0,
+        "kd_temperature": 4.0,
         # Coefficient for distillation loss vs. supervised loss (if any)
         "kd_alpha": 1.0,
     },
@@ -206,7 +211,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Logging / checkpointing
     "logging_config": {
         "log_dir": "./logs",
-        "exp_name": "tiny_imagenet_wrn28_4_baseline",
+        "exp_name": "tiny_imagenet_wrn28_4_tuned",
         "save_checkpoint_every": 50,
         "print_every": 1,
         "use_tensorboard": True,
