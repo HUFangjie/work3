@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Dict, List, Any, Tuple
 from collections import deque
 import csv
+import math
 import os
 import time
 
@@ -80,6 +81,34 @@ def _get_client_overhead_csv_path(config: Dict) -> str:
     exp_name = log_cfg.get("exp_name", "debug_run")
     os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f"{exp_name}_client_overhead_rounds.csv")
+
+
+def _get_aurc_client_scores_csv_path(config: Dict) -> str:
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "aurc_client_scores.csv")
+
+
+def _get_aurc_rc_points_csv_path(config: Dict) -> str:
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "aurc_risk_coverage_points.csv")
+
+
+def _get_aurc_per_round_csv_path(config: Dict) -> str:
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "aurc_per_round.csv")
+
+
+def _get_aurc_tail20_curve_csv_path(config: Dict) -> str:
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, "aurc_tail20_curve.csv")
 
 
 def _get_reliability_dir(config: Dict) -> str:
@@ -134,6 +163,7 @@ def _init_metrics_csv_if_needed(csv_path: str) -> None:
         "test_coe",
         "test_ece",
         "test_ks",
+        "test_aurc",
     ]
 
     if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
@@ -142,28 +172,32 @@ def _init_metrics_csv_if_needed(csv_path: str) -> None:
                 reader = csv.reader(f)
                 old_header = next(reader, None)
                 old_rows = list(reader)
-            if old_header is not None and "test_coe" not in old_header:
-                # Upgrade: insert test_coe after test_avg_conf
-                try:
-                    insert_pos = old_header.index("test_avg_conf") + 1
-                except Exception:
-                    insert_pos = min(4, len(old_header))
+            need_upgrade = (old_header is not None) and (
+                ("test_coe" not in old_header) or ("test_aurc" not in old_header)
+            )
+            if need_upgrade:
+                idx = {k: i for i, k in enumerate(old_header)}
                 new_rows = []
                 for r in old_rows:
-                    r2 = list(r)
-                    if len(r2) < insert_pos:
-                        r2 += [""] * (insert_pos - len(r2))
-                    r2.insert(insert_pos, "nan")
-                    new_rows.append(r2)
-
+                    def getv(name: str, default: str = "nan") -> str:
+                        i = idx.get(name, None)
+                        if i is None or i >= len(r):
+                            return default
+                        return r[i]
+                    new_rows.append([
+                        getv("round", "0"),
+                        getv("test_loss", "nan"),
+                        getv("test_accuracy", "nan"),
+                        getv("test_avg_conf", "nan"),
+                        getv("test_coe", "nan"),
+                        getv("test_ece", "nan"),
+                        getv("test_ks", "nan"),
+                        getv("test_aurc", "nan"),
+                    ])
                 with open(csv_path, "w", newline="") as f:
                     writer = csv.writer(f)
                     writer.writerow(header)
-                    for r in new_rows:
-                        # pad / trim to header length
-                        rr = list(r)[: len(header)] + [""] * max(0, len(header) - len(r))
-                        writer.writerow(rr)
-            # else: already upgraded, keep as-is
+                    writer.writerows(new_rows)
             return
         except Exception:
             # fall through to re-init
@@ -190,6 +224,7 @@ def _append_round_metrics(
         float(test_metrics.get("confidence_on_error", float("nan"))),
         test_metrics.get("ece", 0.0),
         test_metrics.get("ks_confidence", 0.0),
+        test_metrics.get("aurc", float("nan")),
     ]
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
@@ -215,6 +250,55 @@ def _append_round_stealth(
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([round_idx, teacher_entropy_mean, stealth_w1_teacher, history_size, malicious_clients])
+
+
+def _save_tail20_aurc_summary(config: Dict, csv_path: str) -> None:
+    """Compute and save avg AURC over last 20% rounds from metrics CSV."""
+    rows = []
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            try:
+                rnd = int(float(r.get("round", "0")))
+                aurc = float(r.get("test_aurc", "nan"))
+            except Exception:
+                continue
+            if np.isfinite(aurc):
+                rows.append((rnd, aurc))
+    if len(rows) == 0:
+        return
+    rows = sorted(rows, key=lambda x: x[0])
+    n = len(rows)
+    tail_n = max(1, int(np.ceil(0.2 * n)))
+    tail = rows[-tail_n:]
+    tail_avg = float(np.mean([x[1] for x in tail]))
+
+    log_cfg = config.get("logging_config", {})
+    log_dir = log_cfg.get("log_dir", "./logs")
+    exp_name = log_cfg.get("exp_name", "debug_run")
+    out_path = os.path.join(log_dir, f"{exp_name}_aurc_tail20.csv")
+    with open(out_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["exp_name", "num_eval_points", "tail20_points", "tail20_start_round", "tail20_end_round", "tail20_avg_aurc"])
+        w.writerow([exp_name, n, tail_n, tail[0][0], tail[-1][0], f"{tail_avg:.10f}"])
+
+
+def compute_risk_coverage_curve(trust_scores, is_byzantine):
+    trust_scores = np.asarray(trust_scores, dtype=np.float64)
+    is_byzantine = np.asarray(is_byzantine).astype(int)
+    K = len(trust_scores)
+    ranking = np.argsort(-trust_scores)
+    coverage_list, risk_list, retained_byz_list = [], [], []
+    byz_count = 0
+    for r, idx in enumerate(ranking, start=1):
+        byz_count += int(is_byzantine[idx])
+        coverage_list.append(float(r / K))
+        risk_list.append(float(byz_count / r))
+        retained_byz_list.append(int(byz_count))
+    coverage_auc = np.array([0.0] + coverage_list, dtype=np.float64)
+    risk_auc = np.array([0.0] + risk_list, dtype=np.float64)
+    aurc = float(np.trapz(risk_auc, coverage_auc))
+    return coverage_list, risk_list, aurc, ranking, retained_byz_list
 
 
 def _init_client_overhead_csv_if_needed(csv_path: str) -> None:
@@ -243,6 +327,20 @@ def _append_client_overhead_row(csv_path: str, row: List[Any]) -> None:
     with open(csv_path, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(row)
+
+
+def _init_aurc_tracking_csvs_if_needed(config: Dict) -> None:
+    paths_and_headers = [
+        (_get_aurc_client_scores_csv_path(config), ["dataset", "attack", "method", "seed", "round", "client_id", "trust_score", "is_byzantine"]),
+        (_get_aurc_rc_points_csv_path(config), ["dataset", "attack", "method", "seed", "round", "coverage", "risk", "rank", "retained_clients", "retained_byzantine"]),
+        (_get_aurc_per_round_csv_path(config), ["dataset", "attack", "method", "seed", "round", "aurc"]),
+        (_get_aurc_tail20_curve_csv_path(config), ["dataset", "attack", "method", "seed", "coverage", "risk_mean", "risk_std", "aurc_mean", "aurc_std", "tail20_start_round", "tail20_end_round"]),
+    ]
+    for p, h in paths_and_headers:
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            continue
+        with open(p, "w", newline="") as f:
+            csv.writer(f).writerow(h)
 
 
 def _tensor_nbytes(x: Any) -> int:
@@ -280,6 +378,52 @@ def wasserstein_1d(a: torch.Tensor, b: torch.Tensor, quantiles: int = 256) -> fl
 # =========================================================
 # Attack / role helpers
 # =========================================================
+
+
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for group in optimizer.param_groups:
+        group["lr"] = float(lr)
+
+
+def _scheduled_lr(
+    fd_cfg: Dict[str, Any],
+    base_lr: float,
+    round_idx: int,
+    num_rounds: int,
+    min_lr_key: str = "lr_min",
+) -> float:
+    """Round-level LR schedule controlled by fd_config.
+
+    Supported:
+      - "none": keep base LR.
+      - "cosine": warmup + cosine decay to lr_min.
+      - "step": multiply by lr_gamma at each milestone in lr_milestones.
+    """
+    schedule = str(fd_cfg.get("lr_schedule", "none")).lower()
+    if schedule in ("", "none", "constant"):
+        return float(base_lr)
+
+    warmup_rounds = max(0, int(fd_cfg.get("lr_warmup_rounds", 0)))
+    warmup_factor = float(fd_cfg.get("lr_warmup_factor", 0.2))
+    if warmup_rounds > 0 and round_idx <= warmup_rounds:
+        alpha = float(round_idx) / float(max(1, warmup_rounds))
+        return float(base_lr) * (warmup_factor + (1.0 - warmup_factor) * alpha)
+
+    if schedule == "cosine":
+        min_lr = float(fd_cfg.get(min_lr_key, fd_cfg.get("lr_min", 1e-4)))
+        denom = max(1, num_rounds - warmup_rounds)
+        progress = min(1.0, max(0.0, (round_idx - warmup_rounds) / float(denom)))
+        return min_lr + 0.5 * (float(base_lr) - min_lr) * (1.0 + math.cos(math.pi * progress))
+
+    if schedule == "step":
+        gamma = float(fd_cfg.get("lr_gamma", 0.1))
+        milestones = [int(m) for m in fd_cfg.get("lr_milestones", [])]
+        drops = sum(1 for m in milestones if round_idx >= m)
+        return float(base_lr) * (gamma ** drops)
+
+    raise ValueError(f"Unsupported lr_schedule: {schedule}")
+
+
 def _needs_impersonation_attack(config: Dict) -> bool:
     attack_cfg = config.get("attack_config", {})
     if not bool(attack_cfg.get("enabled", False)):
@@ -346,6 +490,11 @@ def run_federated_distillation(
     _init_client_overhead_csv_if_needed(client_overhead_csv_path)
 
     reliability_dir = _get_reliability_dir(config)
+    _init_aurc_tracking_csvs_if_needed(config)
+    aurc_scores_csv = _get_aurc_client_scores_csv_path(config)
+    aurc_points_csv = _get_aurc_rc_points_csv_path(config)
+    aurc_round_csv = _get_aurc_per_round_csv_path(config)
+    aurc_tail20_curve_csv = _get_aurc_tail20_curve_csv_path(config)
 
     # --- stealth config (benign history) ---
     attack_cfg = config.get("attack_config", {}) if isinstance(config.get("attack_config", {}), dict) else {}
@@ -370,8 +519,17 @@ def run_federated_distillation(
     )
 
     rng = np.random.RandomState(config.get("seed", 42))
+    seed = int(config.get("seed", 42))
+    dataset_name = str(config.get("data_config", {}).get("dataset", "unknown"))
+    attack_name = str(config.get("attack_config", {}).get("name", "none"))
+    defense_name = str(config.get("defense_config", {}).get("name", "none"))
+    method_name = "UniformTrust" if defense_name.lower() == "none" else defense_name
+    rc_round_records: List[Dict[str, Any]] = []
+    aurc_round_records: List[Tuple[int, float]] = []
     eval_every = int(eval_cfg.get("eval_every", 5))
     calib_num_bins = int(eval_cfg.get("calibration_num_bins", 15))
+    base_client_lr = float(fd_cfg.get("lr", 0.01))
+    base_server_lr = float(fd_cfg.get("server_lr", base_client_lr))
 
     need_impersonation = _needs_impersonation_attack(config)
     if need_impersonation and (not _IMP_CTX_AVAILABLE):
@@ -382,6 +540,14 @@ def run_federated_distillation(
 
     for round_idx in range(1, num_rounds + 1):
         logger.info(f"=== Round {round_idx}/{num_rounds} ===")
+
+        client_lr = _scheduled_lr(fd_cfg, base_client_lr, round_idx, num_rounds, min_lr_key="lr_min")
+        server_lr = _scheduled_lr(fd_cfg, base_server_lr, round_idx, num_rounds, min_lr_key="server_lr_min")
+        for c in clients.values():
+            _set_optimizer_lr(c.optimizer, client_lr)
+        _set_optimizer_lr(server.optimizer, server_lr)
+        if round_idx == 1 or round_idx % max(1, eval_every) == 0:
+            logger.info(f"Round {round_idx}: lr(client)={client_lr:.6g}, lr(server)={server_lr:.6g}")
 
         # 1) Sample clients (teachers) for this round
         selected_clients: List[int] = list(
@@ -632,6 +798,46 @@ def run_federated_distillation(
         if len(malicious_pgd_list) > 0:
             writer.add_scalar("client_overhead/malicious_t_pgd_mean", float(np.mean(malicious_pgd_list)), round_idx)
 
+        # 2.5) Save trust score / RC points / per-round AURC for this round
+        round_cids = [int(cid) for cid in selected_clients]
+        is_byz = np.array([1 if _is_client_malicious(clients[cid]) else 0 for cid in round_cids], dtype=int)
+        K = len(round_cids)
+        with open(aurc_scores_csv, "a", newline="") as f_sc, open(aurc_points_csv, "a", newline="") as f_pt, open(aurc_round_csv, "a", newline="") as f_ar:
+            w_sc, w_pt, w_ar = csv.writer(f_sc), csv.writer(f_pt), csv.writer(f_ar)
+
+            if method_name == "UniformTrust":
+                num_trials = 100
+                risk_acc = np.zeros(K, dtype=np.float64)
+                for _ in range(num_trials):
+                    perm = rng.permutation(K)
+                    byz_count = 0
+                    for r, j in enumerate(perm, start=1):
+                        byz_count += int(is_byz[j])
+                        risk_acc[r - 1] += byz_count / r
+                risk_list = (risk_acc / float(num_trials)).tolist()
+                coverage_list = [float((r + 1) / K) for r in range(K)]
+                aurc = float(np.trapz(np.array([0.0] + risk_list), np.array([0.0] + coverage_list)))
+                trust_scores = np.ones(K, dtype=np.float64)
+                retained_byz_list = [int(round(risk_list[i] * (i + 1))) for i in range(K)]
+            else:
+                # Fallback trust proxy when explicit trust scores are unavailable in current defense:
+                # lower compute time -> slightly higher trust.
+                trust_scores = np.array([1.0 / (1.0 + float(per_client_t_total.get(cid, 0.0))) for cid in round_cids], dtype=np.float64)
+                coverage_list, risk_list, aurc, ranking, retained_byz_list = compute_risk_coverage_curve(trust_scores, is_byz)
+                # reorder lists to ranking order for consistent rank writing
+                round_cids = [round_cids[int(i)] for i in ranking]
+                is_byz = is_byz[ranking]
+                trust_scores = trust_scores[ranking]
+
+            for i, cid in enumerate(round_cids):
+                w_sc.writerow([dataset_name, attack_name, method_name, seed, round_idx, cid, f"{float(trust_scores[i]):.10f}", int(is_byz[i])])
+            for i, (cov, risk) in enumerate(zip(coverage_list, risk_list), start=1):
+                rb = int(retained_byz_list[i - 1])
+                w_pt.writerow([dataset_name, attack_name, method_name, seed, round_idx, f"{cov:.10f}", f"{risk:.10f}", i, i, rb])
+                rc_round_records.append({"round": int(round_idx), "coverage": float(cov), "risk": float(risk)})
+            w_ar.writerow([dataset_name, attack_name, method_name, seed, round_idx, f"{aurc:.10f}"])
+            aurc_round_records.append((int(round_idx), float(aurc)))
+
         # 3) Optional: supervised training on private data (refresh teachers)
         local_epochs = int(fd_cfg.get("local_epochs", 0))
         if local_epochs > 0:
@@ -686,6 +892,7 @@ def run_federated_distillation(
             writer.add_scalar("test/avg_confidence", test_metrics["avg_confidence"], round_idx)
             writer.add_scalar("test/confidence_on_error", test_metrics.get("confidence_on_error", float("nan")), round_idx)
             writer.add_scalar("test/ks_confidence", test_metrics["ks_confidence"], round_idx)
+            writer.add_scalar("test/aurc", test_metrics.get("aurc", float("nan")), round_idx)
 
             _append_round_metrics(metrics_csv_path, round_idx, test_metrics)
 
@@ -699,4 +906,26 @@ def run_federated_distillation(
             )
             logger.info(f"[ReliabilityDump] saved: {saved_path}")
 
+    _save_tail20_aurc_summary(config=config, csv_path=metrics_csv_path)
+    if len(aurc_round_records) > 0 and len(rc_round_records) > 0:
+        rounds_sorted = sorted(aurc_round_records, key=lambda x: x[0])
+        tail_n = max(1, int(np.ceil(0.2 * len(rounds_sorted))))
+        tail_rounds = [r for r, _ in rounds_sorted[-tail_n:]]
+        tail_set = set(tail_rounds)
+        tail_aurc_vals = [v for r, v in rounds_sorted if r in tail_set]
+        tail_start, tail_end = min(tail_rounds), max(tail_rounds)
+        pts = [p for p in rc_round_records if p["round"] in tail_set]
+        cov_keys = sorted(set(float(p["coverage"]) for p in pts))
+        with open(aurc_tail20_curve_csv, "a", newline="") as f:
+            w = csv.writer(f)
+            for cov in cov_keys:
+                rv = [float(p["risk"]) for p in pts if float(p["coverage"]) == cov]
+                if not rv:
+                    continue
+                w.writerow([
+                    dataset_name, attack_name, method_name, seed,
+                    f"{cov:.10f}", f"{float(np.mean(rv)):.10f}", f"{float(np.std(rv)):.10f}",
+                    f"{float(np.mean(tail_aurc_vals)):.10f}", f"{float(np.std(tail_aurc_vals)):.10f}",
+                    tail_start, tail_end
+                ])
     logger.info("Federated distillation completed.")

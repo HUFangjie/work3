@@ -90,6 +90,34 @@ def create_attack(
             client_id=client_id,
             model=model,
         )
+    elif name == "naive_sharpening":
+        return NaiveSharpeningAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    elif name == "manipulating_kd":
+        return ManipulatingKDAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    elif name == "fed_ace":
+        return FedACEAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
+    elif name == "fed_oca":
+        return FedOCAAttack(
+            is_malicious=is_malicious,
+            cfg=attack_config,
+            client_id=client_id,
+            model=model,
+        )
 
     else:
         # 未知攻击类型，fallback 到最安全的恒等映射
@@ -99,17 +127,4 @@ def create_attack(
             client_id=client_id,
             model=model,
         )
-
-    if name == "naive_sharpening":
-        return NaiveSharpeningAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "manipulating_kd":
-        return ManipulatingKDAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "fed_ace":
-        return FedACEAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
-    if name == "fed_oca":
-        return FedOCAAttack(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-
 

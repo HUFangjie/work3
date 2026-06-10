@@ -18,27 +18,27 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Dataset & partitioning
     "data_config": {
-        "dataset": "cifar10",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
+        "dataset": "tiny_imagenet",         # ["fmnist", "cifar10", "tiny_imagenet", ...]
         # "data_root": "./data/MedMNIST",
         "data_root": "./data",
         "num_clients": 10,
-        "public_ratio": 0.1,          # fraction of data reserved as public
+        "public_ratio": 0.3,          # Tiny-ImageNet FD needs broad public coverage
         "partition_type": "dirichlet",  # ["dirichlet", "shard", "label_separation"]
-        "dirichlet_alpha": 0.5,
+        "dirichlet_alpha": 2.0,
         "num_shards": 40,             # for shard partition
         "label_separation_classes_per_client": 2,  # for extreme Non-IID
-        "batch_size_private": 64,
-        "batch_size_public": 64,
+        "batch_size_private": 128,
+        "batch_size_public": 128,
         "num_workers": 8,
     },
 
     # Model configuration
     "model_config": {
-        "name": "cifar10_cnn",   # ["fmnist_cnn", "cifar10_cnn", "resnet18_tiny", "resnet50_tiny"；"resnet34_tiny"...]
-        "num_classes": 10,      # e.g., FEMNIST: 62 classes; CIFAR10: 10；"resnet18_tiny"：200；pathmnist:9
+        "name": "wrn28_4_tiny",   # ["fmnist_cnn", "cifar10_cnn", "wrn28_4_tiny", "wrn28_8_tiny", "resnet18_tiny", "resnet34_tiny"...]
+        "num_classes": 200,      # e.g., CIFAR10: 10; Tiny-ImageNet: 200; pathmnist: 9
         "input_channels": 3,    # FEMNIST: 1, CIFAR10: 3
         "width_mult": 1.0,
-        "dropout": 0.0,
+        "dropout": 0.1,
     },
 
     # Federated distillation protocol configuration
@@ -49,18 +49,24 @@ BASE_CONFIG: Dict[str, Any] = {
         # - public_logits_micro_bs: micro-batch for teacher inference on public data
         # - uplink_logits_dtype: cast uploaded logits on CPU to save memory/"communication"
         # - public_batches_per_round: limit public batches per round (0 => full epoch)
-        "public_logits_micro_bs": 32,
+        "public_logits_micro_bs": 64,
         "uplink_logits_dtype": "float32",  # {"float32","float16"}
         "public_batches_per_round": 0,
-        "num_rounds": 100,
+        "num_rounds": 400,
         "clients_per_round": 10,
-        "local_epochs": 3,
+        "local_epochs": 2,
         "optimizer": "sgd",
-        "lr": 1e-2,
+        "lr": 3e-2,
         "momentum": 0.9,
         "weight_decay": 5e-4,
+        "server_lr": 2e-2,
+        "lr_schedule": "cosine",
+        "lr_warmup_rounds": 10,
+        "lr_warmup_factor": 0.2,
+        "lr_min": 1e-4,
+        "server_lr_min": 1e-4,
         # Knowledge distillation temperature
-        "kd_temperature": 1.0,
+        "kd_temperature": 4.0,
         # Coefficient for distillation loss vs. supervised loss (if any)
         "kd_alpha": 1.0,
     },
@@ -68,7 +74,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Attack configuration
     "attack_config": {
         "enabled": False,
-        "name": "fed_ace",  # ["none","t3","gaussian","label_flip","topk","impersonation","naive_sharpening","manipulating_kd","fed_ace","fed_oca"]
+        "name": "none",  # ["none","t3","gaussian","label_flip","topk","impersonation","naive_sharpening","manipulating_kd","fed_ace","fed_oca"]
         "malicious_client_fraction": 0.2,
         "fixed_malicious_clients": [0,1],  # list of client ids, or None
 
@@ -89,11 +95,28 @@ BASE_CONFIG: Dict[str, Any] = {
         # Gaussian logit attack (baseline)
         "gaussian": {
             "sigma": 0.1,
+            "mode": "targeted_mean_shift",  # ["targeted_mean_shift","max_prediction_masking"]
+            "scale_with_span": True,
+            "span_scale": 0.35,
+            "span_bias": 0.10,
+            "min_scale": 0.5,
+            "max_scale": None,
+            "target_offset": 1,
+            "mask_strength": 1.0,
+            "mix_with_original": 0.15,
         },
 
         # Label flip / targeted attack (baseline)
         "label_flip": {
             "flip_probability": 0.5,
+            "use_hard_target": True,
+            "target_logit": 10.0,
+            "non_target_logit": -10.0,
+            "fixed_target_offset": 1,  # target = (source + offset) % K
+            "amplitude_scale": 1.5,    # dynamic scaling from original logit range
+            "amplitude_bias": 0.5,     # additive boost on amplitude
+            "min_amplitude": 2.0,      # lower bound for malicious confidence
+            "mix_with_original": 0.2,  # keep soft structure for KD gradients
         },
         "topk": {
         "k": 3,
@@ -101,6 +124,9 @@ BASE_CONFIG: Dict[str, Any] = {
         "normalize": True,
         "norm_low": -10.0,
         "norm_high": 10.0,
+        "rank_weighted": True,      # stronger suppression on top-1 than top-2/3
+        "promote_non_top1": True,   # actively boost a non-top1 target class
+        "promote_strength": 0.8,    # boost magnitude coefficient
         },
         "impersonation": {
         # no hyperparams needed in the paper's definition
@@ -112,11 +138,12 @@ BASE_CONFIG: Dict[str, Any] = {
             "max_abs_logit": None,
         },
         "manipulating_kd": {
-            "gamma": 0.5,         # margin adjust factor
-            "min_margin": 1e-3,
-            "max_margin": 50.0,
-            "l2_budget": None,    # optional per-sample L2 budget on delta logits
-            "seed": 1234,
+            "temperature": 1.2,       # >1 keeps uncertainty, improves stealth
+            "transfer_mass": 0.20,    # move prob mass from pred -> wrong target
+            "target_offset": 1,       # target = (pred + offset) % K
+            "entropy_floor_ratio": 0.35,  # mix with benign probs to avoid entropy collapse
+            "min_prob": 1e-4,         # tail floor before log
+            "eps": 1e-8,
         },
         "fed_ace": {
             "tau": 0.7,           # confidence threshold
@@ -136,7 +163,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "trimean",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
         "none": {},
 
         "entropy_clip": {
@@ -177,14 +204,14 @@ BASE_CONFIG: Dict[str, Any] = {
 
     # Evaluation / calibration configuration (仅 ID 测试集相关)
     "evaluation_config": {
-        "eval_every": 1,              # evaluate every N rounds on val/test
+        "eval_every": 5,              # evaluate every N rounds on val/test
         "calibration_num_bins": 15,   # num bins for ECE / KS
     },
 
     # Logging / checkpointing
     "logging_config": {
         "log_dir": "./logs",
-        "exp_name": "debug_run",
+        "exp_name": "tiny_imagenet_wrn28_4_tuned",
         "save_checkpoint_every": 50,
         "print_every": 1,
         "use_tensorboard": True,

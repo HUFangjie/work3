@@ -50,13 +50,18 @@ class TopKLogitAttack(BaseAttack):
         self.normalize: bool = bool(sub.get("normalize", True))
         self.norm_low: float = float(sub.get("norm_low", -10.0))
         self.norm_high: float = float(sub.get("norm_high", 10.0))
+        self.rank_weighted: bool = bool(sub.get("rank_weighted", True))
+        self.promote_non_top1: bool = bool(sub.get("promote_non_top1", True))
+        self.promote_strength: float = float(sub.get("promote_strength", 0.8))
 
     def attack_logits(
         self,
         x_public: torch.Tensor,
         logits: torch.Tensor,
+        y_public: Optional[torch.Tensor] = None,
         round_idx: Optional[int] = None,
         global_step: Optional[int] = None,
+        **kwargs: Any,
     ) -> torch.Tensor:
         if not self.is_malicious:
             return logits
@@ -67,8 +72,33 @@ class TopKLogitAttack(BaseAttack):
         if self.normalize:
             adv = normalize_logits_minmax(adv, low=self.norm_low, high=self.norm_high)
 
-        # add delta to top-k entries per sample
-        _, idx = torch.topk(adv, k=min(self.k, adv.size(-1)), dim=-1)  # [B,k]
-        src = torch.full(idx.shape, self.delta, device=adv.device, dtype=adv.dtype)
-        adv.scatter_add_(dim=-1, index=idx, src=src)
+        # top-k indices
+        k = min(self.k, adv.size(-1))
+        topv, idx = torch.topk(adv, k=k, dim=-1)  # [B,k]
+
+        # rank-aware penalties to break internal ordering instead of uniform subtraction
+        if self.rank_weighted:
+            # strongest suppression on top-1, weaker on lower ranks
+            rank_w = torch.linspace(1.0, 0.35, steps=k, device=adv.device, dtype=adv.dtype).unsqueeze(0)  # [1,k]
+            penalties = (self.delta * rank_w).expand_as(idx).contiguous()  # [B,k], self.delta is usually negative
+        else:
+            penalties = torch.full_like(topv, self.delta)
+        adv.scatter_add_(dim=-1, index=idx, src=penalties)
+
+        # additionally promote a non-top1 class so argmax is more likely to flip
+        if self.promote_non_top1 and adv.size(-1) > 1:
+            top1_idx = idx[:, 0]  # [B]
+            # choose target as original top-(k+1) if exists, else current smallest class
+            if adv.size(-1) > k:
+                target_idx = torch.topk(adv, k=k + 1, dim=-1).indices[:, -1]
+            else:
+                target_idx = torch.argmin(adv, dim=-1)
+            # avoid accidentally selecting top1
+            same = target_idx.eq(top1_idx)
+            if same.any():
+                target_idx = torch.where(same, (target_idx + 1) % adv.size(-1), target_idx)
+
+            gap = (adv.gather(1, top1_idx.unsqueeze(1)) - adv.gather(1, target_idx.unsqueeze(1))).clamp_min(0.0)
+            boost = (gap + torch.abs(torch.as_tensor(self.delta, device=adv.device, dtype=adv.dtype))) * self.promote_strength
+            adv.scatter_add_(dim=-1, index=target_idx.unsqueeze(1), src=boost)
         return adv

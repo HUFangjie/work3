@@ -286,7 +286,13 @@ class Client:
 
                 self.optimizer.zero_grad()
                 logits = self.model(x)
-                loss = self.ce_loss(logits, y)
+                y_train = self.attack.attack_private_labels(
+                    y=y,
+                    num_classes=int(logits.shape[-1]),
+                )
+                if y_train.ndim > 1:
+                    y_train = y_train.view(-1)
+                loss = self.ce_loss(logits, y_train.long())
                 loss.backward()
                 self.optimizer.step()
 

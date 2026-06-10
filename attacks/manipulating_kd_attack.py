@@ -10,17 +10,7 @@ from attacks.base_attack import BaseAttack
 
 
 class ManipulatingKDAttack(BaseAttack):
-    """Manipulate KD signal by crafting a 'sharpened then biased' teacher distribution.
-
-    Implementation:
-      1) Convert logits -> probs.
-      2) Apply temperature sharpening (T<1).
-      3) Optionally add a small bias towards the predicted class to further amplify confidence.
-      4) Convert back to logits via log(p + eps).
-
-    This keeps argmax unchanged (since bias is towards current argmax), but
-    alters calibration/uncertainty.
-    """
+    """Manipulate KD signal with directional wrong-class transfer + entropy control."""
 
     def __init__(
         self,
@@ -30,9 +20,13 @@ class ManipulatingKDAttack(BaseAttack):
         model=None,
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
-        self.temperature: float = float(self.cfg.get("temperature", 0.5))  # <1 sharper
-        self.bias: float = float(self.cfg.get("bias", 0.02))  # prob mass added to argmax
-        self.eps: float = float(self.cfg.get("eps", 1e-8))
+        mk_cfg = (self.cfg or {}).get("manipulating_kd", {})
+        self.temperature: float = float(mk_cfg.get("temperature", 1.2))  # >1 smoother, less obvious
+        self.transfer_mass: float = float(mk_cfg.get("transfer_mass", 0.20))
+        self.target_offset: int = int(mk_cfg.get("target_offset", 1))
+        self.entropy_floor_ratio: float = float(mk_cfg.get("entropy_floor_ratio", 0.35))
+        self.min_prob: float = float(mk_cfg.get("min_prob", 1e-4))
+        self.eps: float = float(mk_cfg.get("eps", 1e-8))
 
     def attack_logits(
         self,
@@ -47,13 +41,28 @@ class ManipulatingKDAttack(BaseAttack):
             return logits
 
         T = max(self.temperature, 1e-6)
-        probs = F.softmax(logits / T, dim=-1)  # sharpened
+        probs = F.softmax(logits / T, dim=-1)
+        B, C = probs.shape
 
-        if self.bias > 0:
-            pred = probs.argmax(dim=-1)
-            probs = probs * (1.0 - self.bias)
-            probs.scatter_add_(dim=-1, index=pred.unsqueeze(-1), src=torch.full_like(pred.unsqueeze(-1).float(), self.bias))
-            probs = probs / probs.sum(dim=-1, keepdim=True).clamp_min(self.eps)
+        pred = probs.argmax(dim=-1)  # current most likely (often correct) class
+        off = self.target_offset % max(1, C)
+        if off == 0:
+            off = 1
+        target = (pred + off) % C
 
-        adv_logits = torch.log(probs.clamp_min(self.eps))
+        # move probability mass from predicted class -> wrong target class
+        mass = probs.gather(1, pred.unsqueeze(1)) * float(max(0.0, min(1.0, self.transfer_mass)))
+        adv_probs = probs.clone()
+        adv_probs.scatter_add_(1, pred.unsqueeze(1), -mass)
+        adv_probs.scatter_add_(1, target.unsqueeze(1), mass)
+
+        # entropy floor: mix with tempered benign distribution to avoid zero-entropy outlier
+        benign_probs = F.softmax(logits, dim=-1)
+        mix = float(max(0.0, min(1.0, self.entropy_floor_ratio)))
+        adv_probs = (1.0 - mix) * adv_probs + mix * benign_probs
+
+        # avoid long-tail collapse to exact same log-probability line
+        adv_probs = adv_probs.clamp_min(self.min_prob)
+        adv_probs = adv_probs / adv_probs.sum(dim=-1, keepdim=True).clamp_min(self.eps)
+        adv_logits = torch.log(adv_probs.clamp_min(self.eps))
         return adv_logits

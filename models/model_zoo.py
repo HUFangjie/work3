@@ -17,6 +17,8 @@ Supported names:
   - "resnet34_imagenet": torchvision ResNet-34 standard ImageNet stem
   - "resnet50_tiny"    : ResNet-50 with CIFAR-style stem for 64x64 inputs
   - "resnet50_imagenet": torchvision ResNet-50 standard ImageNet stem
+  - "wrn28_4_tiny"     : WideResNet-28-4 for Tiny-ImageNet FD
+  - "wrn28_8_tiny"     : WideResNet-28-8 for Tiny-ImageNet FD
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import torch.nn as nn
 
 from models.fmnist_cnn import FMNISTCNN
 from models.cifar10_cnn import CIFAR10CNN
+from models.tiny_imagenet_wrn import wrn28_4_tiny, wrn28_8_tiny
 
 
 def _tv_resnet_builder(name: str) -> Callable[..., nn.Module]:
@@ -102,6 +105,8 @@ _MODEL_REGISTRY: Dict[str, Callable[..., nn.Module]] = {
     "fmnist_cnn": FMNISTCNN,
     "femnist_cnn": FMNISTCNN,
     "cifar10_cnn": CIFAR10CNN,
+    "wrn28_4_tiny": wrn28_4_tiny,
+    "wrn28_8_tiny": wrn28_8_tiny,
     # ResNet entries are handled in get_model (special kwargs)
 }
 
@@ -134,7 +139,7 @@ def get_model(name: str, **kwargs: Any) -> nn.Module:
     # CNN registry
     if name not in _MODEL_REGISTRY:
         raise ValueError(
-            f"Unknown model name: {name}. Available: {list(_MODEL_REGISTRY.keys()) + ['resnet18_tiny','resnet34_tiny','resnet50_tiny','resnet18_imagenet','resnet34_imagenet','resnet50_imagenet']}"
+            f"Unknown model name: {name}. Available: {list(_MODEL_REGISTRY.keys()) + ['resnet18_tiny','resnet34_tiny','resnet50_tiny','resnet18_imagenet','resnet34_imagenet','resnet50_imagenet','wrn28_4_tiny','wrn28_8_tiny']}"
         )
     model_cls = _MODEL_REGISTRY[name]
     return model_cls(**kwargs)
@@ -175,7 +180,7 @@ def adapt_model_config_for_dataset(
     elif dataset in ["tiny_imagenet", "tiny-imagenet", "tinyimagenet"]:
         _maybe_set("input_channels", 3, lambda v: v not in (3,))
         _maybe_set("num_classes", 200, lambda v: v != 200)
-        _maybe_set("name", "resnet34_tiny", lambda v: str(v).lower() not in ("resnet18_tiny", "resnet34_tiny", "resnet50_tiny", "resnet18_imagenet", "resnet34_imagenet", "resnet50_imagenet"))
+        _maybe_set("name", "wrn28_4_tiny", lambda v: str(v).lower() not in ("wrn28_4_tiny", "wrn28_8_tiny", "resnet18_tiny", "resnet34_tiny", "resnet50_tiny", "resnet18_imagenet", "resnet34_imagenet", "resnet50_imagenet"))
     elif dataset in ["pathmnist", "path-mnist"]:
         _maybe_set("input_channels", 3, lambda v: v not in (3,))
         _maybe_set("num_classes", 9, lambda v: v != 9)
