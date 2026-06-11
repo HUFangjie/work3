@@ -17,6 +17,7 @@ from defenses.defense_mkrum import MKrumDefense
 from defenses.defense_trimean import TriMeanDefense
 from defenses.defense_fedmdr import FedMDRDefense
 from defenses.defense_fedtgd import FedTGDDefense
+from defenses.defense_fedgraphguard import FedGraphGuardDefense
 
 
 def create_defense(
@@ -74,8 +75,6 @@ def create_defense(
             min_clients_kept=min_clients_kept,
         )
 
-    # 未知防御类型，fallback 到最简单的平均
-    return NoDefense(device=device)
     if name == "mkrum":
         cfg = defense_config.get("mkrum", {}) or {}
         return MKrumDefense(
@@ -98,6 +97,19 @@ def create_defense(
             trim_on_weights=bool(cfg.get("trim_on_weights", True)),
         )
 
+
+    if name in ("fedgraphguard", "fedgraphguardi"):
+        cfg = defense_config.get("fedgraphguard", {}) or {}
+        return FedGraphGuardDefense(
+            device=device,
+            keep_ratio=float(cfg.get("keep_ratio", 0.7)),
+            min_clients_kept=int(cfg.get("min_clients_kept", 2)),
+            similarity_temperature=float(cfg.get("similarity_temperature", 0.5)),
+            affinity_floor=float(cfg.get("affinity_floor", 1e-3)),
+            weight_temperature=float(cfg.get("weight_temperature", 0.5)),
+            normalize_logits=bool(cfg.get("normalize_logits", True)),
+        )
+
     if name == "fedtgd":
         cfg = defense_config.get("fedtgd", {}) or {}
         return FedTGDDefense(
@@ -107,5 +119,8 @@ def create_defense(
             min_samples=int(cfg.get("min_samples", 1)),
             normalize_logits=bool(cfg.get("normalize_logits", True)),
         )
+
+    # 未知防御类型，fallback 到最简单的平均
+    return NoDefense(device=device)
 
 

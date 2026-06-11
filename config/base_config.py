@@ -166,7 +166,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedgraphguard","fedtgd"]
         "none": {},
 
         "entropy_clip": {
@@ -194,6 +194,14 @@ BASE_CONFIG: Dict[str, Any] = {
             "trim_on_weights": True,   # restore weight trimming for stronger FedMDR
             "max_iter": 25,         # run Weiszfeld geometric-median refinement
             "eps": 1e-6,
+        },
+        "fedgraphguard": {
+            "keep_ratio": 0.7,
+            "min_clients_kept": 2,
+            "similarity_temperature": 0.5,
+            "affinity_floor": 1e-3,  # dense positive graph avoids disconnected spectral warnings
+            "weight_temperature": 0.5,
+            "normalize_logits": True,
         },
         "fedtgd": {
             "topk": 5,            # k for top-k truncation/features
