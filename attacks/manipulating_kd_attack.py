@@ -1,16 +1,21 @@
 # attacks/manipulating_kd_attack.py
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, Optional, Sequence
 
 import torch
-import torch.nn.functional as F
 
 from attacks.base_attack import BaseAttack
 
 
 class ManipulatingKDAttack(BaseAttack):
-    """Manipulate KD signal with directional wrong-class transfer + entropy control."""
+    """Full-local ManipulatingKD attack with shared malicious logits.
+
+    This attack is intentionally computed from the pre-attack logits of all
+    selected clients.  The optimized tensor is then uploaded identically by
+    every malicious client.
+    """
 
     def __init__(
         self,
@@ -21,12 +26,12 @@ class ManipulatingKDAttack(BaseAttack):
     ) -> None:
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
         mk_cfg = (self.cfg or {}).get("manipulating_kd", {})
-        self.temperature: float = float(mk_cfg.get("temperature", 1.2))  # >1 smoother, less obvious
-        self.transfer_mass: float = float(mk_cfg.get("transfer_mass", 0.20))
-        self.target_offset: int = int(mk_cfg.get("target_offset", 1))
-        self.entropy_floor_ratio: float = float(mk_cfg.get("entropy_floor_ratio", 0.35))
-        self.min_prob: float = float(mk_cfg.get("min_prob", 1e-4))
-        self.eps: float = float(mk_cfg.get("eps", 1e-8))
+        self.tau: float = float(mk_cfg.get("tau", 5.0))
+        self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 20))
+        self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.1))
+        self.dual_lr: float = float(mk_cfg.get("dual_lr", 0.1))
+        self.eps: float = float(mk_cfg.get("eps", 1e-12))
+        self.last_overhead: Dict[str, Any] = {}
 
     def attack_logits(
         self,
@@ -37,32 +42,108 @@ class ManipulatingKDAttack(BaseAttack):
         global_step: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
-        if not self.is_malicious:
-            return logits
+        """ManipulatingKD needs all clients' raw logits; per-client calls are identity."""
+        return logits
 
-        T = max(self.temperature, 1e-6)
-        probs = F.softmax(logits / T, dim=-1)
-        B, C = probs.shape
+    def build_shared_malicious_logits(
+        self,
+        all_client_logits: torch.Tensor,
+        malicious_ids: Sequence[int],
+        round_idx: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Optimize one shared malicious upload from all clients' raw logits.
 
-        pred = probs.argmax(dim=-1)  # current most likely (often correct) class
-        off = self.target_offset % max(1, C)
-        if off == 0:
-            off = 1
-        target = (pred + off) % C
+        Args:
+            all_client_logits: Tensor[M, N, L] containing pre-attack raw logits.
+            malicious_ids: Malicious client indices within the first dimension of
+                all_client_logits.
+            round_idx: Current communication round for overhead logging.
 
-        # move probability mass from predicted class -> wrong target class
-        mass = probs.gather(1, pred.unsqueeze(1)) * float(max(0.0, min(1.0, self.transfer_mass)))
-        adv_probs = probs.clone()
-        adv_probs.scatter_add_(1, pred.unsqueeze(1), -mass)
-        adv_probs.scatter_add_(1, target.unsqueeze(1), mass)
+        Returns:
+            Tensor[N, L] to be uploaded by every malicious client.
+        """
+        t0 = time.perf_counter()
 
-        # entropy floor: mix with tempered benign distribution to avoid zero-entropy outlier
-        benign_probs = F.softmax(logits, dim=-1)
-        mix = float(max(0.0, min(1.0, self.entropy_floor_ratio)))
-        adv_probs = (1.0 - mix) * adv_probs + mix * benign_probs
+        if all_client_logits.dim() != 3:
+            raise ValueError(
+                "ManipulatingKD expects all_client_logits with shape [M, N, L], "
+                f"got {tuple(all_client_logits.shape)}"
+            )
 
-        # avoid long-tail collapse to exact same log-probability line
-        adv_probs = adv_probs.clamp_min(self.min_prob)
-        adv_probs = adv_probs / adv_probs.sum(dim=-1, keepdim=True).clamp_min(self.eps)
-        adv_logits = torch.log(adv_probs.clamp_min(self.eps))
-        return adv_logits
+        M = int(all_client_logits.shape[0])
+        N = int(all_client_logits.shape[1])
+        malicious_ids = [int(i) for i in malicious_ids]
+        C = len(malicious_ids)
+        if C == 0 or not self.is_malicious:
+            return all_client_logits.mean(dim=0).detach()
+        if min(malicious_ids) < 0 or max(malicious_ids) >= M:
+            raise ValueError(f"malicious_ids must index the M={M} clients in all_client_logits")
+
+        tau = max(float(self.tau), 1e-12)
+        all_client_logits = all_client_logits.detach().float()
+
+        reference_logits = all_client_logits.mean(dim=0)
+        center_logits = all_client_logits.mean(dim=0)
+
+        distance = ((all_client_logits - center_logits.unsqueeze(0)) ** 2).mean(dim=-1)
+        max_ref_distance = distance.max(dim=0).values
+        radius = C * max_ref_distance
+
+        malicious_set = set(malicious_ids)
+        benign_ids = [i for i in range(M) if i not in malicious_set]
+        if len(benign_ids) > 0:
+            benign_sum = all_client_logits[benign_ids].sum(dim=0)
+        else:
+            benign_sum = torch.zeros_like(reference_logits)
+
+        shared_malicious_logits = (
+            all_client_logits[malicious_ids]
+            .mean(dim=0)
+            .detach()
+            .clone()
+        )
+        shared_malicious_logits.requires_grad_(True)
+
+        dual = torch.zeros(N, device=all_client_logits.device)
+
+        for _ in range(max(0, self.num_ascent_steps)):
+            poisoned_aggregate = (benign_sum + C * shared_malicious_logits) / M
+
+            ref_prob = torch.softmax(reference_logits / tau, dim=-1)
+            poisoned_log_prob = torch.log_softmax(poisoned_aggregate / tau, dim=-1)
+
+            kl = (
+                ref_prob
+                * (
+                    torch.log(ref_prob.clamp_min(self.eps))
+                    - poisoned_log_prob
+                )
+            ).sum(dim=-1)
+
+            attack_distance = ((shared_malicious_logits - center_logits) ** 2).mean(dim=-1)
+            violation = attack_distance - radius
+
+            lagrangian = (kl - dual.detach() * violation).mean()
+            grad = torch.autograd.grad(lagrangian, shared_malicious_logits)[0]
+
+            with torch.no_grad():
+                shared_malicious_logits += self.attack_lr * grad
+                dual += self.dual_lr * violation.detach()
+                dual.clamp_(min=0.0)
+
+            shared_malicious_logits.requires_grad_(True)
+
+        with torch.no_grad():
+            final_attack_distance = ((shared_malicious_logits - center_logits) ** 2).mean(dim=-1)
+            final_violation = final_attack_distance - radius
+            self.last_overhead = {
+                "round": -1 if round_idx is None else int(round_idx),
+                "t_total_s": float(time.perf_counter() - t0),
+                "t_diag_s": 0.0,
+                "t_tta_s": 0.0,
+                "t_pgd_s": float(time.perf_counter() - t0),
+                "hard_cnt": int((final_violation > 0).sum().item()),
+                "mean_kl": float(kl.detach().mean().item()) if self.num_ascent_steps > 0 else 0.0,
+                "max_violation": float(final_violation.max().item()) if N > 0 else 0.0,
+            }
+            return shared_malicious_logits.detach().clone()

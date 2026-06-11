@@ -138,12 +138,11 @@ BASE_CONFIG: Dict[str, Any] = {
             "max_abs_logit": None,
         },
         "manipulating_kd": {
-            "temperature": 1.2,       # >1 keeps uncertainty, improves stealth
-            "transfer_mass": 0.20,    # move prob mass from pred -> wrong target
-            "target_offset": 1,       # target = (pred + offset) % K
-            "entropy_floor_ratio": 0.35,  # mix with benign probs to avoid entropy collapse
-            "min_prob": 1e-4,         # tail floor before log
-            "eps": 1e-8,
+            "tau": 5.0,               # KL(reference || poisoned) temperature
+            "num_ascent_steps": 20,   # Lagrangian gradient-ascent iterations
+            "attack_lr": 0.1,         # primal ascent step size for shared logits
+            "dual_lr": 0.1,           # dual ascent step size for stealth constraints
+            "eps": 1e-12,
         },
         "fed_ace": {
             "tau": 0.7,           # confidence threshold

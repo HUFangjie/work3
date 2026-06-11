@@ -532,6 +532,10 @@ def run_federated_distillation(
     base_server_lr = float(fd_cfg.get("server_lr", base_client_lr))
 
     need_impersonation = _needs_impersonation_attack(config)
+    need_manipulating_kd = (
+        bool(config.get("attack_config", {}).get("enabled", False))
+        and str(config.get("attack_config", {}).get("name", "none")).lower() == "manipulating_kd"
+    )
     if need_impersonation and (not _IMP_CTX_AVAILABLE):
         raise RuntimeError(
             "Impersonation attack is enabled, but attacks/impersonation_context.py "
@@ -583,7 +587,63 @@ def run_federated_distillation(
                 break
             client_logits: Dict[int, torch.Tensor] = {}
 
-            if need_impersonation:
+            if need_manipulating_kd and len(malicious_ids) > 0:
+                raw_logits_by_cid: Dict[int, torch.Tensor] = {}
+                for cid in selected_clients:
+                    client = clients[int(cid)]
+                    t0 = time.perf_counter()
+                    logits = client.compute_public_logits(
+                        x_public=x_pub,
+                        y_public=y_pub,
+                        round_idx=round_idx,
+                        apply_attack=False,
+                    )
+                    dt = time.perf_counter() - t0
+
+                    per_client_t_total[int(cid)] += float(dt)
+                    per_client_batches[int(cid)] += 1
+                    raw_logits_by_cid[int(cid)] = logits
+
+                selected_order = [int(cid) for cid in selected_clients]
+                all_client_logits = torch.stack([raw_logits_by_cid[cid].float() for cid in selected_order], dim=0)
+                selected_pos = {cid: pos for pos, cid in enumerate(selected_order)}
+                malicious_positions = [selected_pos[int(cid)] for cid in malicious_ids]
+
+                attack_owner = clients[int(malicious_ids[0])].attack
+                t0 = time.perf_counter()
+                with torch.enable_grad():
+                    shared_malicious_logits = attack_owner.build_shared_malicious_logits(
+                        all_client_logits=all_client_logits,
+                        malicious_ids=malicious_positions,
+                        round_idx=round_idx,
+                    ).detach().float().cpu()
+                attack_dt = time.perf_counter() - t0
+
+                for cid in selected_order:
+                    if cid in malicious_ids:
+                        uploaded = shared_malicious_logits.clone()
+                        client_logits[cid] = uploaded
+                        per_client_uplink_bytes[cid] += _tensor_nbytes(uploaded)
+                        per_client_t_total[cid] += float(attack_dt)
+
+                        atk = getattr(clients[cid], "attack", None)
+                        if atk is not None:
+                            atk.last_overhead = dict(getattr(attack_owner, "last_overhead", {}) or {})
+                            atk.last_overhead["round"] = int(round_idx)
+                            atk.last_overhead["t_total_s"] = float(attack_dt)
+                            atk.last_overhead["t_pgd_s"] = float(attack_dt)
+
+                        per_client_t_attack_total[cid] += float(attack_dt)
+                        per_client_t_pgd[cid] += float(attack_dt)
+                        oh = getattr(atk, "last_overhead", None) if atk is not None else None
+                        if isinstance(oh, dict):
+                            per_client_hard_cnt_sum[cid] += int(oh.get("hard_cnt", 0))
+                    else:
+                        uploaded = raw_logits_by_cid[cid]
+                        client_logits[cid] = uploaded
+                        per_client_uplink_bytes[cid] += _tensor_nbytes(uploaded)
+
+            elif need_impersonation:
                 # benign first
                 for cid in benign_ids:
                     client = clients[int(cid)]

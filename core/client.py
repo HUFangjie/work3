@@ -174,9 +174,13 @@ class Client:
         x_public: torch.Tensor,
         y_public: Optional[torch.Tensor] = None,
         round_idx: Optional[int] = None,
+        apply_attack: bool = True,
     ) -> torch.Tensor:
         """
         Compute (possibly attacked) logits on a batch of public data.
+
+        Args:
+            apply_attack: when False, return the client's raw pre-attack logits.
 
         Returns CPU tensor for easier "communication".
         """
@@ -196,7 +200,7 @@ class Client:
         # T3-style attacks run gradient-based optimization in logit-space.
         # If we compute adversarial logits under inference_mode/no_grad,
         # loss.backward() will fail with "does not require grad".
-        need_attack_grad = bool(getattr(self.attack, "is_malicious", False))
+        need_attack_grad = bool(apply_attack and getattr(self.attack, "is_malicious", False))
 
         adv_chunks: list[torch.Tensor] = []
         for xb in x_public.split(micro_bs, dim=0):
@@ -210,10 +214,12 @@ class Client:
                 else:
                     logits = self.model(xb)
 
-            # Apply attack in logit space.
+            # Apply attack in logit space unless a caller needs raw pre-attack logits.
             # For malicious clients, explicitly enable grad so PGD can backprop
             # through the perturbation variable (not through the model).
-            if need_attack_grad:
+            if not apply_attack:
+                adv_logits = logits
+            elif need_attack_grad:
                 with torch.enable_grad():
                     adv_logits = self.attack.attack_logits(
                         x_public=xb,
