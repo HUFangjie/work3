@@ -65,9 +65,9 @@
       "q": 0.25
     },
     "fedmdr": {
-      "rho": 0.0,
-      "trim_on_weights": false,
-      "max_iter": 0,
+      "rho": 5.0,
+      "trim_on_weights": true,
+      "max_iter": 25,
       "eps": 1e-06
     },
     "fedtgd": {

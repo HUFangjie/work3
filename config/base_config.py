@@ -190,9 +190,9 @@ BASE_CONFIG: Dict[str, Any] = {
             "q": 0.25,            # quartile for Q1/Q3
         },
         "fedmdr": {
-            "rho": 0.0,             # flatten accuracy weights to weaken FedMDR
-            "trim_on_weights": False,  # keep low-weight clients instead of second-stage trimming
-            "max_iter": 0,          # skip Weiszfeld; use weighted mean initialization
+            "rho": 5.0,             # emphasize high-public-accuracy clients moderately
+            "trim_on_weights": True,   # restore weight trimming for stronger FedMDR
+            "max_iter": 25,         # run Weiszfeld geometric-median refinement
             "eps": 1e-6,
         },
         "fedtgd": {
