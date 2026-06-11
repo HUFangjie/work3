@@ -27,10 +27,11 @@ class ManipulatingKDAttack(BaseAttack):
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
         mk_cfg = (self.cfg or {}).get("manipulating_kd", {})
         self.tau: float = float(mk_cfg.get("tau", 5.0))
-        self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 20))
-        self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.1))
+        self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 40))
+        self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.2))
         self.dual_lr: float = float(mk_cfg.get("dual_lr", 0.1))
         self.init_ratio: float = float(mk_cfg.get("init_ratio", 0.05))
+        self.grad_eps: float = float(mk_cfg.get("grad_eps", 1e-8))
         self.eps: float = float(mk_cfg.get("eps", 1e-12))
         self.last_overhead: Dict[str, Any] = {}
 
@@ -58,6 +59,27 @@ class ManipulatingKDAttack(BaseAttack):
         scale = torch.sqrt(radius.unsqueeze(-1).clamp_min(0.0) / mse.clamp_min(self.eps))
         scale = torch.minimum(scale, torch.ones_like(scale))
         return center + diff * scale
+
+    def _normalize_per_sample(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Normalize each sample vector to unit RMS to avoid tiny KL gradients."""
+        rms = torch.sqrt((tensor ** 2).mean(dim=-1, keepdim=True)).clamp_min(self.grad_eps)
+        return tensor / rms
+
+    def _kl_reference_to_poisoned(
+        self,
+        reference_logits: torch.Tensor,
+        poisoned_aggregate: torch.Tensor,
+        tau: float,
+    ) -> torch.Tensor:
+        ref_prob = torch.softmax(reference_logits / tau, dim=-1)
+        poisoned_log_prob = torch.log_softmax(poisoned_aggregate / tau, dim=-1)
+        return (
+            ref_prob
+            * (
+                torch.log(ref_prob.clamp_min(self.eps))
+                - poisoned_log_prob
+            )
+        ).sum(dim=-1)
 
     def build_shared_malicious_logits(
         self,
@@ -102,6 +124,7 @@ class ManipulatingKDAttack(BaseAttack):
         distance = ((all_client_logits - center_logits.unsqueeze(0)) ** 2).mean(dim=-1)
         max_ref_distance = distance.max(dim=0).values
         radius = C * max_ref_distance
+        radius_sqrt = torch.sqrt(radius.clamp_min(self.eps)).unsqueeze(-1)
 
         malicious_set = set(malicious_ids)
         benign_ids = [i for i in range(M) if i not in malicious_set]
@@ -110,6 +133,9 @@ class ManipulatingKDAttack(BaseAttack):
         else:
             benign_sum = torch.zeros_like(reference_logits)
 
+        # Keep the paper's malicious-mean initialization, but perturb it inside
+        # the feasible MSE ball.  Without this, poisoned_aggregate can equal the
+        # reference exactly and KL(reference || poisoned) has a zero gradient.
         base_logits = (
             all_client_logits[malicious_ids]
             .mean(dim=0)
@@ -118,15 +144,9 @@ class ManipulatingKDAttack(BaseAttack):
         )
 
         direction = torch.randn_like(base_logits)
-        direction = direction / (
-            torch.sqrt((direction ** 2).mean(dim=-1, keepdim=True)).clamp_min(self.eps)
-        )
+        direction = self._normalize_per_sample(direction)
 
-        jitter = (
-            self.init_ratio
-            * torch.sqrt(radius.clamp_min(self.eps)).unsqueeze(-1)
-            * direction
-        )
+        jitter = self.init_ratio * radius_sqrt * direction
 
         shared_malicious_logits = base_logits + jitter
         shared_malicious_logits = self._project_to_mse_ball(
@@ -141,36 +161,71 @@ class ManipulatingKDAttack(BaseAttack):
             .requires_grad_(True)
         )
 
+        with torch.no_grad():
+            poisoned_aggregate = (benign_sum + C * shared_malicious_logits) / M
+            best_kl = self._kl_reference_to_poisoned(
+                reference_logits=reference_logits,
+                poisoned_aggregate=poisoned_aggregate,
+                tau=tau,
+            ).detach()
+            best_logits = shared_malicious_logits.detach().clone()
+
         dual = torch.zeros(N, device=all_client_logits.device)
+        step_scale = max(float(self.attack_lr), 0.0) * radius_sqrt
 
         for _ in range(max(0, self.num_ascent_steps)):
             poisoned_aggregate = (benign_sum + C * shared_malicious_logits) / M
-
-            ref_prob = torch.softmax(reference_logits / tau, dim=-1)
-            poisoned_log_prob = torch.log_softmax(poisoned_aggregate / tau, dim=-1)
-
-            kl = (
-                ref_prob
-                * (
-                    torch.log(ref_prob.clamp_min(self.eps))
-                    - poisoned_log_prob
-                )
-            ).sum(dim=-1)
+            kl = self._kl_reference_to_poisoned(
+                reference_logits=reference_logits,
+                poisoned_aggregate=poisoned_aggregate,
+                tau=tau,
+            )
 
             attack_distance = ((shared_malicious_logits - center_logits) ** 2).mean(dim=-1)
             violation = attack_distance - radius
 
             lagrangian = (kl - dual.detach() * violation).mean()
             grad = torch.autograd.grad(lagrangian, shared_malicious_logits)[0]
+            grad = self._normalize_per_sample(grad)
 
             with torch.no_grad():
-                shared_malicious_logits += self.attack_lr * grad
-                dual += self.dual_lr * violation.detach()
+                improved = kl.detach() > best_kl
+                best_kl = torch.where(improved, kl.detach(), best_kl)
+                best_logits = torch.where(improved.unsqueeze(-1), shared_malicious_logits.detach(), best_logits)
+
+                # Projected normalized ascent is deliberately used in addition
+                # to the dual update: the KL gradient near the reference is very
+                # small, so raw gradient ascent often never reaches the useful
+                # stealth boundary within a public batch.
+                shared_malicious_logits = shared_malicious_logits + step_scale * grad
+                shared_malicious_logits = self._project_to_mse_ball(
+                    logits=shared_malicious_logits,
+                    center=center_logits,
+                    radius=radius,
+                )
+
+                post_distance = ((shared_malicious_logits - center_logits) ** 2).mean(dim=-1)
+                post_violation = post_distance - radius
+                dual += self.dual_lr * post_violation.detach()
                 dual.clamp_(min=0.0)
 
-            shared_malicious_logits.requires_grad_(True)
+            shared_malicious_logits = shared_malicious_logits.detach().clone().requires_grad_(True)
 
         with torch.no_grad():
+            poisoned_aggregate = (benign_sum + C * shared_malicious_logits) / M
+            final_kl = self._kl_reference_to_poisoned(
+                reference_logits=reference_logits,
+                poisoned_aggregate=poisoned_aggregate,
+                tau=tau,
+            ).detach()
+            improved = final_kl > best_kl
+            shared_malicious_logits = torch.where(
+                improved.unsqueeze(-1),
+                shared_malicious_logits.detach(),
+                best_logits,
+            )
+            final_kl = torch.where(improved, final_kl, best_kl)
+
             final_attack_distance = ((shared_malicious_logits - center_logits) ** 2).mean(dim=-1)
             final_violation = final_attack_distance - radius
             self.last_overhead = {
@@ -180,7 +235,7 @@ class ManipulatingKDAttack(BaseAttack):
                 "t_tta_s": 0.0,
                 "t_pgd_s": float(time.perf_counter() - t0),
                 "hard_cnt": int((final_violation > 0).sum().item()),
-                "mean_kl": float(kl.detach().mean().item()) if self.num_ascent_steps > 0 else 0.0,
+                "mean_kl": float(final_kl.mean().item()) if N > 0 else 0.0,
                 "max_violation": float(final_violation.max().item()) if N > 0 else 0.0,
             }
             return shared_malicious_logits.detach().clone()
