@@ -142,6 +142,7 @@ BASE_CONFIG: Dict[str, Any] = {
             "num_ascent_steps": 20,   # Lagrangian gradient-ascent iterations
             "attack_lr": 0.1,         # primal ascent step size for shared logits
             "dual_lr": 0.1,           # dual ascent step size for stealth constraints
+            "init_ratio": 0.05,       # small feasible random jitter to avoid KL=0 stationarity
             "eps": 1e-12,
         },
         "fed_ace": {

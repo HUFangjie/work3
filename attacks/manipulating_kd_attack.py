@@ -30,6 +30,7 @@ class ManipulatingKDAttack(BaseAttack):
         self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 20))
         self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.1))
         self.dual_lr: float = float(mk_cfg.get("dual_lr", 0.1))
+        self.init_ratio: float = float(mk_cfg.get("init_ratio", 0.05))
         self.eps: float = float(mk_cfg.get("eps", 1e-12))
         self.last_overhead: Dict[str, Any] = {}
 
@@ -44,6 +45,19 @@ class ManipulatingKDAttack(BaseAttack):
     ) -> torch.Tensor:
         """ManipulatingKD needs all clients' raw logits; per-client calls are identity."""
         return logits
+
+    def _project_to_mse_ball(
+        self,
+        logits: torch.Tensor,
+        center: torch.Tensor,
+        radius: torch.Tensor,
+    ) -> torch.Tensor:
+        """Project each sample's logits into its per-sample MSE stealth ball."""
+        diff = logits - center
+        mse = (diff ** 2).mean(dim=-1, keepdim=True)
+        scale = torch.sqrt(radius.unsqueeze(-1).clamp_min(0.0) / mse.clamp_min(self.eps))
+        scale = torch.minimum(scale, torch.ones_like(scale))
+        return center + diff * scale
 
     def build_shared_malicious_logits(
         self,
@@ -74,7 +88,7 @@ class ManipulatingKDAttack(BaseAttack):
         N = int(all_client_logits.shape[1])
         malicious_ids = [int(i) for i in malicious_ids]
         C = len(malicious_ids)
-        if C == 0 or not self.is_malicious:
+        if C == 0:
             return all_client_logits.mean(dim=0).detach()
         if min(malicious_ids) < 0 or max(malicious_ids) >= M:
             raise ValueError(f"malicious_ids must index the M={M} clients in all_client_logits")
@@ -96,13 +110,36 @@ class ManipulatingKDAttack(BaseAttack):
         else:
             benign_sum = torch.zeros_like(reference_logits)
 
-        shared_malicious_logits = (
+        base_logits = (
             all_client_logits[malicious_ids]
             .mean(dim=0)
             .detach()
             .clone()
         )
-        shared_malicious_logits.requires_grad_(True)
+
+        direction = torch.randn_like(base_logits)
+        direction = direction / (
+            torch.sqrt((direction ** 2).mean(dim=-1, keepdim=True)).clamp_min(self.eps)
+        )
+
+        jitter = (
+            self.init_ratio
+            * torch.sqrt(radius.clamp_min(self.eps)).unsqueeze(-1)
+            * direction
+        )
+
+        shared_malicious_logits = base_logits + jitter
+        shared_malicious_logits = self._project_to_mse_ball(
+            logits=shared_malicious_logits,
+            center=center_logits,
+            radius=radius,
+        )
+        shared_malicious_logits = (
+            shared_malicious_logits
+            .detach()
+            .clone()
+            .requires_grad_(True)
+        )
 
         dual = torch.zeros(N, device=all_client_logits.device)
 
