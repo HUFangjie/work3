@@ -1,135 +1,123 @@
 # defenses/defense_fedgraphguard.py
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
+from sklearn.cluster import SpectralClustering
 
 from defenses.base_defense import BaseDefense
 
 
 class FedGraphGuardDefense(BaseDefense):
-    """FedGraphGuard aggregation for federated distillation logits.
+    """FedGraphGuard: graph-based trust-aware robust aggregation for FD logits.
 
-    The original warning reported on Tiny-ImageNet comes from spectral methods
-    receiving a disconnected affinity graph.  This implementation keeps the
-    graph-based FedGraphGuard design (client-logit graph construction, graph
-    connectivity repair, trust scoring, client filtering, weighted aggregation)
-    but does **not** call sklearn's spectral embedding on a disconnected graph.
+    This keeps the original FedGraphGuard pipeline: reference-free graph
+    construction, local GNN purification, global low-rank/subspace purification,
+    spectral clustering based trust evaluation, PPR trust propagation, and
+    trust-aware trimmed aggregation.
 
-    Key points:
-      1) Build one feature vector per client from its public logits.
-      2) Compute cosine affinities between clients.
-      3) Build either a dense graph or a sparse k-NN graph.
-      4) If sparse graph components are disconnected, deterministically connect
-         them with the strongest cross-component edges before scoring.
-      5) Score clients by graph degree / medoid proximity, keep the most trusted
-         clients, and return a trust-weighted logit aggregate.
-
-    This keeps the defense behavior graph-based while removing the repeated
-    "Graph is not fully connected" sklearn warning at the source.
+    Tiny-ImageNet can make the learned affinity graph disconnected, which causes
+    sklearn's spectral embedding warning.  We repair the affinity matrix before
+    spectral clustering by deterministically connecting components with the
+    strongest cross-component edges, rather than replacing the defense logic.
     """
 
     def __init__(
         self,
         device: torch.device,
-        keep_ratio: float = 0.7,
-        min_clients_kept: int = 2,
-        similarity_temperature: float = 0.5,
-        affinity_floor: float = 1e-6,
-        weight_temperature: float = 0.5,
-        normalize_logits: bool = True,
-        graph_mode: str = "knn",
-        knn_k: int = 0,
-        connect_components: bool = True,
-        component_floor: float = 1e-3,
-        medoid_mix: float = 0.25,
+        temperature: float = 1.0,
+        topk: int = 3,
+        winsor_q: float = 0.1,
+        rn: int = 3,
+        gnn_layers: int = 2,
+        gnn_gamma: float = 0.5,
+        lrr_lambda: float = 0.05,
+        lrr_gamma: float = 0.01,
+        lrr_iters: int = 40,
+        lrr_lr: float = 0.1,
+        alpha: float = 0.6,
+        n_clusters: int = 2,
+        tau: float = 1.0,
+        phi_min: float = 0.02,
+        ppr_beta: float = 0.85,
+        ppr_max_iter: int = 100,
+        ppr_tol: float = 1e-6,
+        trust_threshold: float = 0.1,
+        trim_ratio: float = 0.2,
+        eps: float = 1e-12,
     ) -> None:
         super().__init__(device=device)
-        self.keep_ratio = float(keep_ratio)
-        self.min_clients_kept = int(min_clients_kept)
-        self.similarity_temperature = float(similarity_temperature)
-        self.affinity_floor = float(affinity_floor)
-        self.weight_temperature = float(weight_temperature)
-        self.normalize_logits = bool(normalize_logits)
-        self.graph_mode = str(graph_mode).lower()
-        self.knn_k = int(knn_k)
-        self.connect_components = bool(connect_components)
-        self.component_floor = float(component_floor)
-        self.medoid_mix = float(medoid_mix)
+        self.temperature = float(temperature)
+        self.topk = int(topk)
+        self.winsor_q = float(winsor_q)
+        self.rn = int(rn)
+        self.gnn_layers = int(gnn_layers)
+        self.gnn_gamma = float(gnn_gamma)
+        self.lrr_lambda = float(lrr_lambda)
+        self.lrr_gamma = float(lrr_gamma)
+        self.lrr_iters = int(lrr_iters)
+        self.lrr_lr = float(lrr_lr)
+        self.alpha = float(alpha)
+        self.n_clusters = int(n_clusters)
+        self.tau = float(tau)
+        self.phi_min = float(phi_min)
+        self.ppr_beta = float(ppr_beta)
+        self.ppr_max_iter = int(ppr_max_iter)
+        self.ppr_tol = float(ppr_tol)
+        self.trust_threshold = float(trust_threshold)
+        self.trim_ratio = float(trim_ratio)
+        self.eps = float(eps)
 
-    # ------------------------------------------------------------------
-    # Feature / similarity helpers
-    # ------------------------------------------------------------------
-    def _stack_client_logits(
-        self,
-        client_logits: Dict[int, torch.Tensor],
-    ) -> Tuple[List[int], torch.Tensor]:
-        client_ids = [int(cid) for cid in client_logits.keys()]
-        if len(client_ids) == 0:
-            raise ValueError("FedGraphGuardDefense received empty client_logits.")
-        stacked = torch.stack(
-            [client_logits[cid].detach().float().to(self.device) for cid in client_ids],
-            dim=0,
-        )
-        return client_ids, stacked
+        self.last_debug: Dict[str, Any] = {}
 
-    def _flatten_features(self, stacked_logits: torch.Tensor) -> torch.Tensor:
-        features = stacked_logits.reshape(stacked_logits.shape[0], -1)
-        if self.normalize_logits:
-            features = features - features.mean(dim=1, keepdim=True)
-            features = features / features.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
-        return features
+    def build_reference_free_graph(self, logits: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        n, _, c = logits.shape
+        probs = torch.softmax(logits / max(self.temperature, self.eps), dim=-1)
 
-    @staticmethod
-    def _cosine_similarity(features: torch.Tensor) -> torch.Tensor:
-        normalized = features - features.mean(dim=1, keepdim=True)
-        normalized = normalized / normalized.norm(p=2, dim=1, keepdim=True).clamp_min(1e-12)
-        return (normalized @ normalized.t()).clamp(min=-1.0, max=1.0)
+        k = max(1, min(self.topk, c))
+        top_idx = torch.topk(probs, k=k, dim=-1).indices
+        top_mask = torch.zeros_like(probs, dtype=torch.bool)
+        top_mask.scatter_(-1, top_idx, True)
 
-    def _similarity_to_affinity(self, sim: torch.Tensor) -> torch.Tensor:
-        temp = max(self.similarity_temperature, 1e-12)
-        affinity = torch.exp((sim - 1.0) / temp)
-        floor = max(self.affinity_floor, 0.0)
-        if floor > 0.0:
-            affinity = affinity.clamp_min(floor)
-        affinity.fill_diagonal_(0.0)
-        return affinity
+        WC = torch.eye(n, dtype=torch.float32, device=logits.device)
+        low_q = max(0.0, min(0.5, self.winsor_q))
+        high_q = 1.0 - low_q
 
-    # ------------------------------------------------------------------
-    # Graph construction / connectivity repair
-    # ------------------------------------------------------------------
-    def _default_knn_k(self, num_clients: int) -> int:
-        if self.knn_k > 0:
-            return min(max(1, self.knn_k), max(1, num_clients - 1))
-        # A small but not too sparse k.  For 10 clients this gives k=4, which
-        # is robust on Tiny-ImageNet without making the graph fully uniform.
-        return min(max(1, int(math.ceil(math.sqrt(num_clients))) + 1), max(1, num_clients - 1))
+        for i in range(n):
+            for j in range(i + 1, n):
+                inter = (top_mask[i] & top_mask[j]).sum(dim=-1).float()
+                union = (top_mask[i] | top_mask[j]).sum(dim=-1).float().clamp_min(1.0)
+                jac = inter / union
+                lo = torch.quantile(jac, low_q)
+                hi = torch.quantile(jac, high_q)
+                sim = torch.clamp(jac, lo, hi).mean()
+                WC[i, j] = sim
+                WC[j, i] = sim
 
-    def _build_knn_graph(self, affinity: torch.Tensor) -> torch.Tensor:
-        num_clients = int(affinity.shape[0])
-        if num_clients <= 2:
-            return affinity.clone()
+        Wc = torch.zeros_like(WC)
+        k_nn = max(1, min(self.rn, max(1, n - 1)))
+        for i in range(n):
+            scores = WC[i].clone()
+            scores[i] = -1.0
+            nn_idx = torch.topk(scores, k=k_nn, largest=True).indices
+            Wc[i, nn_idx] = WC[i, nn_idx]
 
-        k = self._default_knn_k(num_clients)
-        graph = torch.zeros_like(affinity)
-        topk_idx = torch.topk(affinity, k=k, dim=1, largest=True).indices
-        graph.scatter_(1, topk_idx, affinity.gather(1, topk_idx))
-        # Symmetrize because graph defenses usually treat client similarity as
-        # undirected; max preserves the stronger directed k-NN edge.
-        graph = torch.maximum(graph, graph.t())
-        graph.fill_diagonal_(0.0)
-        return graph
+        Wc = torch.maximum(Wc, Wc.t())
+        Wc = self._connect_torch_graph(Wc)
+        row_sum = Wc.sum(dim=1, keepdim=True).clamp_min(self.eps)
+        P = Wc / row_sum
+        return probs, WC, Wc, P
 
-    def _connected_components(self, graph: torch.Tensor) -> List[List[int]]:
-        num_clients = int(graph.shape[0])
-        adjacency = graph > 0
-        visited = torch.zeros(num_clients, dtype=torch.bool, device=graph.device)
+    def _connected_components_numpy(self, A: np.ndarray) -> List[List[int]]:
+        n = int(A.shape[0])
+        visited = np.zeros(n, dtype=bool)
         components: List[List[int]] = []
+        adjacency = A > 0.0
 
-        for start in range(num_clients):
-            if bool(visited[start].item()):
+        for start in range(n):
+            if visited[start]:
                 continue
             stack = [start]
             visited[start] = True
@@ -137,97 +125,214 @@ class FedGraphGuardDefense(BaseDefense):
             while stack:
                 node = stack.pop()
                 comp.append(node)
-                neighbors = torch.nonzero(adjacency[node], as_tuple=False).view(-1).tolist()
-                for nb in neighbors:
+                for nb in np.flatnonzero(adjacency[node]):
                     nb_i = int(nb)
-                    if not bool(visited[nb_i].item()):
+                    if not visited[nb_i]:
                         visited[nb_i] = True
                         stack.append(nb_i)
             components.append(comp)
         return components
 
-    def _connect_components(self, graph: torch.Tensor, dense_affinity: torch.Tensor) -> torch.Tensor:
-        if not self.connect_components:
-            return graph
+    def _connect_numpy_affinity(self, A: np.ndarray) -> np.ndarray:
+        """Connect a precomputed affinity matrix before SpectralClustering.
 
-        connected = graph.clone()
-        components = self._connected_components(connected)
+        sklearn warns when the graph induced by the affinity matrix is not fully
+        connected.  This method preserves the learned affinities but adds the
+        minimum necessary bridge edges between components.  The bridge uses the
+        strongest available cross-component affinity; if that value is zero, it
+        falls back to ``eps`` so the graph is connected but barely perturbed.
+        """
+        A = np.asarray(A, dtype=np.float64)
+        n = int(A.shape[0])
+        if n <= 1:
+            return A
+
+        A = np.nan_to_num(A, nan=0.0, posinf=0.0, neginf=0.0)
+        A = np.maximum(A, 0.0)
+        A = 0.5 * (A + A.T)
+        np.fill_diagonal(A, 0.0)
+
+        components = self._connected_components_numpy(A)
         if len(components) <= 1:
-            return connected
+            A_sc = A.copy()
+            np.fill_diagonal(A_sc, max(float(A_sc.max()), self.eps))
+            return A_sc
 
-        # Iteratively attach the closest remaining component to the first
-        # component using the strongest cross-component affinity.  This is small
-        # (num clients per round), deterministic, and avoids sklearn's warning.
+        connected = A.copy()
         while len(components) > 1:
             base = components[0]
-            best_edge: Optional[Tuple[int, int, float, int]] = None
-            base_idx = torch.tensor(base, dtype=torch.long, device=graph.device)
-
+            best: Optional[Tuple[int, int, float, int]] = None
             for comp_pos, comp in enumerate(components[1:], start=1):
-                comp_idx = torch.tensor(comp, dtype=torch.long, device=graph.device)
-                block = dense_affinity.index_select(0, base_idx).index_select(1, comp_idx)
-                flat_idx = int(torch.argmax(block).item())
+                block = A[np.ix_(base, comp)]
+                if block.size == 0:
+                    continue
+                flat_idx = int(np.argmax(block))
                 row = flat_idx // len(comp)
                 col = flat_idx % len(comp)
-                weight = float(block[row, col].item())
-                if best_edge is None or weight > best_edge[2]:
-                    best_edge = (base[row], comp[col], weight, comp_pos)
+                weight = float(block[row, col])
+                if best is None or weight > best[2]:
+                    best = (base[row], comp[col], weight, comp_pos)
 
-            if best_edge is None:
+            if best is None:
                 break
 
-            i, j, weight, comp_pos = best_edge
-            repaired_weight = max(weight, max(self.component_floor, self.affinity_floor, 0.0))
-            connected[i, j] = repaired_weight
-            connected[j, i] = repaired_weight
+            i, j, weight, comp_pos = best
+            bridge = max(weight, self.eps)
+            connected[i, j] = bridge
+            connected[j, i] = bridge
             components[0] = components[0] + components[comp_pos]
             del components[comp_pos]
 
+        np.fill_diagonal(connected, max(float(connected.max()), self.eps))
         return connected
 
-    def _build_connected_graph(self, features: torch.Tensor) -> torch.Tensor:
-        sim = self._cosine_similarity(features)
-        dense_affinity = self._similarity_to_affinity(sim)
+    def _connect_torch_graph(self, W: torch.Tensor) -> torch.Tensor:
+        if W.numel() == 0 or W.shape[0] <= 1:
+            return W
+        A = W.detach().float().cpu().numpy()
+        A_conn = self._connect_numpy_affinity(A)
+        np.fill_diagonal(A_conn, 0.0)
+        return torch.tensor(A_conn, dtype=W.dtype, device=W.device)
 
-        if self.graph_mode == "dense":
-            graph = dense_affinity
+    def local_purification_gnn(self, probs: torch.Tensor, Wc: torch.Tensor) -> torch.Tensor:
+        h = probs.mean(dim=1)  # [n, c]
+        n = h.shape[0]
+
+        for _ in range(max(1, self.gnn_layers)):
+            h_new = torch.empty_like(h)
+            for i in range(n):
+                nei = torch.where(Wc[i] > 0)[0]
+                if nei.numel() == 0:
+                    med = h[i]
+                else:
+                    neigh_feat = torch.cat([h[i : i + 1], h[nei]], dim=0)
+                    med = torch.median(neigh_feat, dim=0).values
+                h_new[i] = (1.0 - self.gnn_gamma) * h[i] + self.gnn_gamma * med
+            h = h_new
+        return h
+
+    def global_subspace_purification(self, X: torch.Tensor, Wc: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        n = X.shape[0]
+        Xt = X.t()  # [d, n]
+        G = X @ X.t()  # [n, n]
+        Z = torch.relu(G.clone())
+        Z.fill_diagonal_(0.0)
+
+        I = torch.eye(n, dtype=X.dtype, device=X.device)
+        for _ in range(max(1, self.lrr_iters)):
+            grad_rec = 2.0 * (G @ (Z - I))
+            grad_l1 = self.lrr_gamma * torch.sign(Z)
+            Z = Z - self.lrr_lr * (grad_rec + grad_l1)
+
+            try:
+                u, s, vh = torch.linalg.svd(Z, full_matrices=False)
+                s = torch.relu(s - self.lrr_lr * self.lrr_lambda)
+                Z = (u * s.unsqueeze(0)) @ vh
+            except Exception:
+                pass
+
+            Z = torch.clamp(Z, min=0.0)
+            Z.fill_diagonal_(0.0)
+
+        W_tilde = 0.5 * (torch.abs(Z) + torch.abs(Z.t()))
+        W_final = self.alpha * W_tilde + (1.0 - self.alpha) * Wc
+        W_final = self._connect_torch_graph(W_final)
+        P_final = W_final / W_final.sum(dim=1, keepdim=True).clamp_min(self.eps)
+
+        _ = Xt  # keep explicit use consistent with formulation
+        return Z, W_tilde, P_final
+
+    def evaluate_cluster_trust(self, X: torch.Tensor, Z: torch.Tensor, W_tilde: torch.Tensor, Wc: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        n = X.shape[0]
+        if n <= 2:
+            clusters = torch.zeros(n, dtype=torch.long, device=X.device)
         else:
-            graph = self._build_knn_graph(dense_affinity)
+            k = max(2, min(self.n_clusters, n - 1))
+            A = W_tilde.detach().cpu().numpy()
+            A = self._connect_numpy_affinity(A)
+            try:
+                sc = SpectralClustering(
+                    n_clusters=k,
+                    affinity="precomputed",
+                    random_state=0,
+                    assign_labels="kmeans",
+                )
+                labels_np = sc.fit_predict(A)
+            except Exception:
+                labels_np = np.zeros(n, dtype=np.int64)
+            clusters = torch.tensor(labels_np, dtype=torch.long, device=X.device)
 
-        return self._connect_components(graph=graph, dense_affinity=dense_affinity)
+        Xt = X.t()
+        X_hat = (Xt @ Z).t()
+        unique = torch.unique(clusters)
 
-    # ------------------------------------------------------------------
-    # Trust scoring / aggregation
-    # ------------------------------------------------------------------
-    def _trust_scores(self, graph: torch.Tensor, features: torch.Tensor) -> torch.Tensor:
-        num_clients = int(graph.shape[0])
-        degree = graph.sum(dim=1) / max(num_clients - 1, 1)
+        t0 = torch.zeros(n, dtype=torch.float32, device=X.device)
+        for cid in unique.tolist():
+            mask = clusters == int(cid)
+            idx = torch.where(mask)[0]
+            if idx.numel() == 0:
+                continue
 
-        # Medoid proximity stabilizes degree-only scores when k-NN degrees tie.
-        pair_dist = torch.cdist(features, features, p=2)
-        medoid = int(torch.argmin(pair_dist.mean(dim=1)).item())
-        medoid_sim = graph[medoid]
-        medoid_sim = medoid_sim / medoid_sim.max().clamp_min(1e-12)
+            err = torch.norm(X[idx] - X_hat[idx], p="fro").pow(2)
 
-        mix = min(max(self.medoid_mix, 0.0), 1.0)
-        return (1.0 - mix) * degree + mix * medoid_sim
+            in_mask = mask.float().view(-1, 1)
+            out_mask = (1.0 - mask.float()).view(1, -1)
+            cut = (Wc * (in_mask @ out_mask)).sum()
+            vol = Wc[idx].sum().clamp_min(self.eps)
+            phi = cut / vol
 
-    def _num_clients_to_keep(self, num_clients: int) -> int:
-        ratio = min(max(self.keep_ratio, 0.0), 1.0)
-        keep_n = int(math.ceil(num_clients * ratio))
-        keep_n = max(keep_n, min(self.min_clients_kept, num_clients))
-        return min(max(1, keep_n), num_clients)
+            conf = torch.exp(-err / max(self.tau, self.eps)) * (phi > self.phi_min).float()
+            t0[idx] = conf.float()
 
-    def _aggregate_kept_logits(
-        self,
-        stacked_logits: torch.Tensor,
-        trust: torch.Tensor,
-        keep_idx: torch.Tensor,
-    ) -> torch.Tensor:
-        kept_trust = trust[keep_idx]
-        temp = max(self.weight_temperature, 1e-12)
-        weights = torch.softmax((kept_trust - kept_trust.max()) / temp, dim=0)
-        return (weights.view(-1, 1, 1) * stacked_logits[keep_idx]).sum(dim=0)
+        if float(t0.sum().item()) <= self.eps:
+            t0 = torch.ones_like(t0) / max(1, n)
+        else:
+            t0 = t0 / t0.sum().clamp_min(self.eps)
+        return clusters, t0
+
+    def propagate_trust(self, P_final: torch.Tensor, t0: torch.Tensor) -> torch.Tensor:
+        t = t0.clone()
+        for _ in range(max(1, self.ppr_max_iter)):
+            t_next = self.ppr_beta * (P_final.t() @ t) + (1.0 - self.ppr_beta) * t0
+            if torch.norm(t_next - t, p=1) < self.ppr_tol:
+                t = t_next
+                break
+            t = t_next
+
+        t = torch.clamp(t, min=0.0)
+        if float(t.sum().item()) <= self.eps:
+            t = torch.ones_like(t) / max(1, t.numel())
+        else:
+            t = t / t.sum().clamp_min(self.eps)
+        return t
+
+    def aggregate_logits(self, logits: torch.Tensor, trust: torch.Tensor) -> torch.Tensor:
+        n, b, c = logits.shape
+        keep = torch.where(trust >= self.trust_threshold)[0]
+        if keep.numel() == 0:
+            keep = torch.topk(trust, k=1).indices
+
+        x = logits[keep]
+        w = trust[keep]
+        m = x.shape[0]
+
+        trim_each = int(max(0, min(m // 2, int(np.floor(m * self.trim_ratio / 2.0)))))
+        agg = torch.empty((b, c), dtype=logits.dtype, device=logits.device)
+
+        for j in range(b):
+            for cls in range(c):
+                vals = x[:, j, cls]
+                ord_idx = torch.argsort(vals)
+                if m - 2 * trim_each <= 0:
+                    keep_idx = ord_idx
+                else:
+                    keep_idx = ord_idx[trim_each : m - trim_each]
+
+                v = vals[keep_idx]
+                ww = w[keep_idx]
+                agg[j, cls] = (v * ww).sum() / ww.sum().clamp_min(self.eps)
+
+        return agg
 
     def aggregate(
         self,
@@ -235,19 +340,25 @@ class FedGraphGuardDefense(BaseDefense):
         y_public: Optional[torch.Tensor] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
-        _, stacked_logits = self._stack_client_logits(client_logits)
-        num_clients = int(stacked_logits.shape[0])
-        if num_clients == 1:
-            return stacked_logits[0]
+        if not client_logits:
+            raise ValueError("FedGraphGuardDefense received empty client_logits.")
 
-        features = self._flatten_features(stacked_logits)
-        graph = self._build_connected_graph(features)
-        trust = self._trust_scores(graph=graph, features=features)
+        cids = list(client_logits.keys())
+        logits = torch.stack([client_logits[cid].detach().float().to(self.device) for cid in cids], dim=0)
 
-        keep_n = self._num_clients_to_keep(num_clients)
-        keep_idx = torch.topk(trust, k=keep_n, largest=True).indices
-        return self._aggregate_kept_logits(
-            stacked_logits=stacked_logits,
-            trust=trust,
-            keep_idx=keep_idx,
-        )
+        probs, WC, Wc, _ = self.build_reference_free_graph(logits)
+        X = self.local_purification_gnn(probs, Wc)
+        Z, W_tilde, P_final = self.global_subspace_purification(X, Wc)
+        clusters, t0 = self.evaluate_cluster_trust(X, Z, W_tilde, Wc)
+        trust = self.propagate_trust(P_final, t0)
+        agg = self.aggregate_logits(logits, trust)
+
+        self.last_debug = {
+            "client_ids": cids,
+            "trust_scores": {cid: float(trust[i].item()) for i, cid in enumerate(cids)},
+            "cluster_labels": {cid: int(clusters[i].item()) for i, cid in enumerate(cids)},
+            "Wc": Wc.detach().cpu(),
+            "W_tilde": W_tilde.detach().cpu(),
+            "Z": Z.detach().cpu(),
+        }
+        return agg
