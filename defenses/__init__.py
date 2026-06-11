@@ -105,9 +105,14 @@ def create_defense(
             keep_ratio=float(cfg.get("keep_ratio", 0.7)),
             min_clients_kept=int(cfg.get("min_clients_kept", 2)),
             similarity_temperature=float(cfg.get("similarity_temperature", 0.5)),
-            affinity_floor=float(cfg.get("affinity_floor", 1e-3)),
+            affinity_floor=float(cfg.get("affinity_floor", 1e-6)),
             weight_temperature=float(cfg.get("weight_temperature", 0.5)),
             normalize_logits=bool(cfg.get("normalize_logits", True)),
+            graph_mode=str(cfg.get("graph_mode", "knn")),
+            knn_k=int(cfg.get("knn_k", 0)),
+            connect_components=bool(cfg.get("connect_components", True)),
+            component_floor=float(cfg.get("component_floor", 1e-3)),
+            medoid_mix=float(cfg.get("medoid_mix", 0.25)),
         )
 
     if name == "fedtgd":

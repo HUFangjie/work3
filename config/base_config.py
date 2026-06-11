@@ -199,9 +199,14 @@ BASE_CONFIG: Dict[str, Any] = {
             "keep_ratio": 0.7,
             "min_clients_kept": 2,
             "similarity_temperature": 0.5,
-            "affinity_floor": 1e-3,  # dense positive graph avoids disconnected spectral warnings
+            "affinity_floor": 1e-6,
             "weight_temperature": 0.5,
             "normalize_logits": True,
+            "graph_mode": "knn",
+            "knn_k": 0,             # 0 => auto sqrt(num_clients)+1
+            "connect_components": True,
+            "component_floor": 1e-3,  # repair disconnected k-NN graph before graph scoring
+            "medoid_mix": 0.25,
         },
         "fedtgd": {
             "topk": 5,            # k for top-k truncation/features
