@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import torch
 
@@ -27,10 +27,12 @@ class ManipulatingKDAttack(BaseAttack):
         super().__init__(is_malicious=is_malicious, cfg=cfg, client_id=client_id, model=model)
         mk_cfg = (self.cfg or {}).get("manipulating_kd", {})
         self.tau: float = float(mk_cfg.get("tau", 5.0))
-        self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 40))
-        self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.2))
+        self.num_ascent_steps: int = int(mk_cfg.get("num_ascent_steps", 80))
+        self.attack_lr: float = float(mk_cfg.get("attack_lr", 0.35))
         self.dual_lr: float = float(mk_cfg.get("dual_lr", 0.1))
-        self.init_ratio: float = float(mk_cfg.get("init_ratio", 0.05))
+        self.init_ratio: float = float(mk_cfg.get("init_ratio", 0.10))
+        self.boundary_ratio: float = float(mk_cfg.get("boundary_ratio", 1.0))
+        self.num_restarts: int = int(mk_cfg.get("num_restarts", 4))
         self.grad_eps: float = float(mk_cfg.get("grad_eps", 1e-8))
         self.eps: float = float(mk_cfg.get("eps", 1e-12))
         self.last_overhead: Dict[str, Any] = {}
@@ -80,6 +82,28 @@ class ManipulatingKDAttack(BaseAttack):
                 - poisoned_log_prob
             )
         ).sum(dim=-1)
+
+    def _select_best_candidate(
+        self,
+        candidates: torch.Tensor,
+        reference_logits: torch.Tensor,
+        benign_sum: torch.Tensor,
+        num_malicious: int,
+        num_clients: int,
+        tau: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Pick the highest-KL candidate independently for each public sample."""
+        poisoned_aggregate = (benign_sum.unsqueeze(0) + num_malicious * candidates) / num_clients
+        kl = self._kl_reference_to_poisoned(
+            reference_logits=reference_logits.unsqueeze(0),
+            poisoned_aggregate=poisoned_aggregate,
+            tau=tau,
+        )
+        best_idx = kl.argmax(dim=0)
+        gather_idx = best_idx.view(1, -1, 1).expand(1, candidates.shape[1], candidates.shape[2])
+        best_logits = candidates.gather(dim=0, index=gather_idx).squeeze(0)
+        best_kl = kl.gather(dim=0, index=best_idx.view(1, -1)).squeeze(0)
+        return best_logits, best_kl
 
     def build_shared_malicious_logits(
         self,
@@ -133,42 +157,87 @@ class ManipulatingKDAttack(BaseAttack):
         else:
             benign_sum = torch.zeros_like(reference_logits)
 
-        # Keep the paper's malicious-mean initialization, but perturb it inside
-        # the feasible MSE ball.  Without this, poisoned_aggregate can equal the
-        # reference exactly and KL(reference || poisoned) has a zero gradient.
+        # Keep the paper's malicious-mean initialization, but do not rely on
+        # local KL gradients from that point.  We first build several feasible
+        # boundary candidates and choose the strongest one per sample; this uses
+        # the full stealth budget immediately and avoids weak attacks caused by
+        # the near-zero KL gradient around the reference aggregate.
         base_logits = (
             all_client_logits[malicious_ids]
             .mean(dim=0)
             .detach()
             .clone()
         )
-
-        direction = torch.randn_like(base_logits)
-        direction = self._normalize_per_sample(direction)
-
-        jitter = self.init_ratio * radius_sqrt * direction
-
-        shared_malicious_logits = base_logits + jitter
-        shared_malicious_logits = self._project_to_mse_ball(
-            logits=shared_malicious_logits,
+        base_logits = self._project_to_mse_ball(
+            logits=base_logits,
             center=center_logits,
             radius=radius,
         )
-        shared_malicious_logits = (
-            shared_malicious_logits
-            .detach()
-            .clone()
-            .requires_grad_(True)
+
+        candidates = [base_logits]
+
+        direction = self._normalize_per_sample(torch.randn_like(base_logits))
+        jitter = self.init_ratio * radius_sqrt * direction
+        candidates.append(
+            self._project_to_mse_ball(
+                logits=base_logits + jitter,
+                center=center_logits,
+                radius=radius,
+            )
+        )
+
+        ref_prob = torch.softmax(reference_logits / tau, dim=-1)
+
+        top_class = ref_prob.argmax(dim=-1, keepdim=True)
+        bottom_class = ref_prob.argmin(dim=-1, keepdim=True)
+        top_bottom_direction = torch.zeros_like(base_logits)
+        top_bottom_direction.scatter_add_(1, top_class, -torch.ones_like(top_class, dtype=base_logits.dtype))
+        top_bottom_direction.scatter_add_(1, bottom_class, torch.ones_like(bottom_class, dtype=base_logits.dtype))
+        candidates.append(
+            center_logits
+            + self.boundary_ratio * radius_sqrt * self._normalize_per_sample(top_bottom_direction)
+        )
+
+        anti_prob_direction = ref_prob.mean(dim=-1, keepdim=True) - ref_prob
+        candidates.append(
+            center_logits
+            + self.boundary_ratio * radius_sqrt * self._normalize_per_sample(anti_prob_direction)
+        )
+
+        anti_logit_direction = reference_logits.mean(dim=-1, keepdim=True) - reference_logits
+        candidates.append(
+            center_logits
+            + self.boundary_ratio * radius_sqrt * self._normalize_per_sample(anti_logit_direction)
+        )
+
+        for _ in range(max(0, self.num_restarts)):
+            candidates.append(
+                center_logits
+                + self.boundary_ratio
+                * radius_sqrt
+                * self._normalize_per_sample(torch.randn_like(base_logits))
+            )
+
+        candidate_logits = torch.stack(
+            [
+                self._project_to_mse_ball(logits=cand, center=center_logits, radius=radius)
+                for cand in candidates
+            ],
+            dim=0,
         )
 
         with torch.no_grad():
-            poisoned_aggregate = (benign_sum + C * shared_malicious_logits) / M
-            best_kl = self._kl_reference_to_poisoned(
+            shared_malicious_logits, best_kl = self._select_best_candidate(
+                candidates=candidate_logits,
                 reference_logits=reference_logits,
-                poisoned_aggregate=poisoned_aggregate,
+                benign_sum=benign_sum,
+                num_malicious=C,
+                num_clients=M,
                 tau=tau,
-            ).detach()
+            )
             best_logits = shared_malicious_logits.detach().clone()
+
+        shared_malicious_logits = shared_malicious_logits.detach().clone().requires_grad_(True)
 
         dual = torch.zeros(N, device=all_client_logits.device)
         step_scale = max(float(self.attack_lr), 0.0) * radius_sqrt

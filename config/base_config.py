@@ -139,10 +139,12 @@ BASE_CONFIG: Dict[str, Any] = {
         },
         "manipulating_kd": {
             "tau": 5.0,               # KL(reference || poisoned) temperature
-            "num_ascent_steps": 40,   # projected Lagrangian ascent iterations
-            "attack_lr": 0.2,         # normalized ascent step as a fraction of stealth radius
+            "num_ascent_steps": 80,   # projected Lagrangian ascent iterations
+            "attack_lr": 0.35,        # normalized ascent step as a fraction of stealth radius
             "dual_lr": 0.1,           # dual ascent step size for stealth constraints
-            "init_ratio": 0.05,       # small feasible random jitter to avoid KL=0 stationarity
+            "init_ratio": 0.10,       # small feasible random jitter to avoid KL=0 stationarity
+            "boundary_ratio": 1.0,    # initialize directional candidates on stealth boundary
+            "num_restarts": 4,        # random boundary candidates before ascent
             "grad_eps": 1e-8,         # gradient normalization floor
             "eps": 1e-12,
         },
