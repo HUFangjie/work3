@@ -65,11 +65,10 @@
       "q": 0.25
     },
     "fedmdr": {
-      "trim_ratio": 0.2,
-      "softmax_temp": 1.0,
-      "max_iter": 50,
-      "eps": 1e-06,
-      "min_clients_kept": 2
+      "rho": 0.0,
+      "trim_on_weights": false,
+      "max_iter": 0,
+      "eps": 1e-06
     },
     "fedtgd": {
       "topk": 5,

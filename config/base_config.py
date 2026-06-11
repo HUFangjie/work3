@@ -190,11 +190,10 @@ BASE_CONFIG: Dict[str, Any] = {
             "q": 0.25,            # quartile for Q1/Q3
         },
         "fedmdr": {
-            "trim_ratio": 0.2,    # trim bottom clients by batch accuracy
-            "softmax_temp": 1.0,  # softmax temperature over accuracies
-            "max_iter": 50,       # Weiszfeld iterations
+            "rho": 0.0,             # flatten accuracy weights to weaken FedMDR
+            "trim_on_weights": False,  # keep low-weight clients instead of second-stage trimming
+            "max_iter": 0,          # skip Weiszfeld; use weighted mean initialization
             "eps": 1e-6,
-            "min_clients_kept": 2,
         },
         "fedtgd": {
             "topk": 5,            # k for top-k truncation/features
