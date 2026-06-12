@@ -209,7 +209,7 @@ class Client:
             # Forward pass does not need gradients.
             with torch.no_grad():
                 if use_amp and (self.device.type == "cuda"):
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast(device_type="cuda"):
                         logits = self.model(xb)
                 else:
                     logits = self.model(xb)
