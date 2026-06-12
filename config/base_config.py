@@ -138,12 +138,15 @@ BASE_CONFIG: Dict[str, Any] = {
             "max_abs_logit": None,
         },
         "manipulating_kd": {
-            "temperature": 1.2,       # >1 keeps uncertainty, improves stealth
-            "transfer_mass": 0.20,    # move prob mass from pred -> wrong target
-            "target_offset": 1,       # target = (pred + offset) % K
-            "entropy_floor_ratio": 0.35,  # mix with benign probs to avoid entropy collapse
-            "min_prob": 1e-4,         # tail floor before log
-            "eps": 1e-8,
+            "tau": 5.0,               # KL(reference || poisoned) temperature
+            "num_ascent_steps": 80,   # projected Lagrangian ascent iterations
+            "attack_lr": 0.35,        # normalized ascent step as a fraction of stealth radius
+            "dual_lr": 0.1,           # dual ascent step size for stealth constraints
+            "init_ratio": 0.10,       # small feasible random jitter to avoid KL=0 stationarity
+            "boundary_ratio": 1.0,    # initialize directional candidates on stealth boundary
+            "num_restarts": 4,        # random boundary candidates before ascent
+            "grad_eps": 1e-8,         # gradient normalization floor
+            "eps": 1e-12,
         },
         "fed_ace": {
             "tau": 0.7,           # confidence threshold
@@ -163,7 +166,7 @@ BASE_CONFIG: Dict[str, Any] = {
     # Defense configuration
     "defense_config": {
         "enabled": False,
-        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedtgd"]
+        "name": "none",  # ["none","cronus","entropy_clip","mkrum","trimean","fedmdr","fedgraphguard","fedtgd"]
         "none": {},
 
         "entropy_clip": {
@@ -187,11 +190,32 @@ BASE_CONFIG: Dict[str, Any] = {
             "q": 0.25,            # quartile for Q1/Q3
         },
         "fedmdr": {
-            "trim_ratio": 0.2,    # trim bottom clients by batch accuracy
-            "softmax_temp": 1.0,  # softmax temperature over accuracies
-            "max_iter": 50,       # Weiszfeld iterations
+            "rho": 5.0,             # emphasize high-public-accuracy clients moderately
+            "trim_on_weights": True,   # restore weight trimming for stronger FedMDR
+            "max_iter": 25,         # run Weiszfeld geometric-median refinement
             "eps": 1e-6,
-            "min_clients_kept": 2,
+        },
+        "fedgraphguard": {
+            "temperature": 0.7,
+            "topk": 1,
+            "winsor_q": 0.2,
+            "rn": 2,
+            "gnn_layers": 3,
+            "gnn_gamma": 0.8,
+            "lrr_lambda": 0.15,
+            "lrr_gamma": 0.05,
+            "lrr_iters": 80,
+            "lrr_lr": 0.05,
+            "alpha": 0.8,
+            "n_clusters": 2,
+            "tau": 0.6,
+            "phi_min": 0.08,
+            "ppr_beta": 0.9,
+            "ppr_max_iter": 200,
+            "ppr_tol": 1e-7,
+            "trust_threshold": 0.35,
+            "trim_ratio": 0.4,
+            "eps": 1e-12,
         },
         "fedtgd": {
             "topk": 5,            # k for top-k truncation/features

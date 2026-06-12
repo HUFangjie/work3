@@ -17,6 +17,7 @@ from defenses.defense_mkrum import MKrumDefense
 from defenses.defense_trimean import TriMeanDefense
 from defenses.defense_fedmdr import FedMDRDefense
 from defenses.defense_fedtgd import FedTGDDefense
+from defenses.defense_fedgraphguard import FedGraphGuardDefense
 
 
 def create_defense(
@@ -74,8 +75,6 @@ def create_defense(
             min_clients_kept=min_clients_kept,
         )
 
-    # 未知防御类型，fallback 到最简单的平均
-    return NoDefense(device=device)
     if name == "mkrum":
         cfg = defense_config.get("mkrum", {}) or {}
         return MKrumDefense(
@@ -98,6 +97,33 @@ def create_defense(
             trim_on_weights=bool(cfg.get("trim_on_weights", True)),
         )
 
+
+    if name in ("fedgraphguard", "fedgraphguardi"):
+        cfg = defense_config.get("fedgraphguard", {}) or {}
+        return FedGraphGuardDefense(
+            device=device,
+            temperature=float(cfg.get("temperature", 1.0)),
+            topk=int(cfg.get("topk", 3)),
+            winsor_q=float(cfg.get("winsor_q", 0.1)),
+            rn=int(cfg.get("rn", 3)),
+            gnn_layers=int(cfg.get("gnn_layers", 2)),
+            gnn_gamma=float(cfg.get("gnn_gamma", 0.5)),
+            lrr_lambda=float(cfg.get("lrr_lambda", 0.05)),
+            lrr_gamma=float(cfg.get("lrr_gamma", 0.01)),
+            lrr_iters=int(cfg.get("lrr_iters", 40)),
+            lrr_lr=float(cfg.get("lrr_lr", 0.1)),
+            alpha=float(cfg.get("alpha", 0.6)),
+            n_clusters=int(cfg.get("n_clusters", 2)),
+            tau=float(cfg.get("tau", 1.0)),
+            phi_min=float(cfg.get("phi_min", 0.02)),
+            ppr_beta=float(cfg.get("ppr_beta", 0.85)),
+            ppr_max_iter=int(cfg.get("ppr_max_iter", 100)),
+            ppr_tol=float(cfg.get("ppr_tol", 1e-6)),
+            trust_threshold=float(cfg.get("trust_threshold", 0.1)),
+            trim_ratio=float(cfg.get("trim_ratio", 0.2)),
+            eps=float(cfg.get("eps", 1e-12)),
+        )
+
     if name == "fedtgd":
         cfg = defense_config.get("fedtgd", {}) or {}
         return FedTGDDefense(
@@ -107,5 +133,8 @@ def create_defense(
             min_samples=int(cfg.get("min_samples", 1)),
             normalize_logits=bool(cfg.get("normalize_logits", True)),
         )
+
+    # 未知防御类型，fallback 到最简单的平均
+    return NoDefense(device=device)
 
 
