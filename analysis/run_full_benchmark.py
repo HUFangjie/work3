@@ -61,8 +61,13 @@ def write_exp_override_config(base_log_dir: str, exp_prefix: str, exp: Dict) -> 
     Important: this deliberately does *not* duplicate data/model/FD hyperparams.
     Those should be configured once in config/base_config.py, which is exactly
     the workflow needed for choosing wrn28_4_tiny vs wrn28_8_tiny.
+
+    Runtime artifacts are written to a per-experiment artifact_dir under
+    base_log_dir. This prevents concurrent benchmark runs on different GPUs from
+    appending to the same CSV/log files when they share a code checkout.
     """
     exp_name = f"{exp_prefix}_{exp['name']}"
+    artifact_dir = os.path.join(base_log_dir, exp_name)
     override: Dict = {
         "attack_config": {
             "enabled": bool(exp.get("attack_enabled", False)),
@@ -73,12 +78,14 @@ def write_exp_override_config(base_log_dir: str, exp_prefix: str, exp: Dict) -> 
             "name": str(exp.get("defense", "none")),
         },
         "logging_config": {
-            "log_dir": base_log_dir,
+            "log_dir": artifact_dir,
+            "artifact_dir": artifact_dir,
             "exp_name": exp_name,
         },
     }
 
     os.makedirs(base_log_dir, exist_ok=True)
+    os.makedirs(artifact_dir, exist_ok=True)
     path = os.path.join(base_log_dir, f"{exp_name}_override.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(override, f, indent=2, ensure_ascii=False)
@@ -155,11 +162,14 @@ def main() -> None:
     print(f"Seed override     : {args.seed}")
     print(f"Base log dir      : {args.base_log_dir}")
     print(f"Exp name prefix   : {args.exp_prefix}")
+    print("Artifact dirs     : <base_log_dir>/<exp_prefix>_<experiment_name>/")
     print("----------------------------------------")
 
     for i, exp in enumerate(EXPERIMENTS):
         print(f"[{i + 1}/{len(EXPERIMENTS)}] Running experiment: {exp['name']}")
         print(f"    Description : {exp['description']}")
+        artifact_dir = os.path.join(args.base_log_dir, f"{args.exp_prefix}_{exp['name']}")
+        print(f"    Artifacts   : {artifact_dir}")
         cmd = build_command(args, exp, main_abs)
         print(f"    Command     : {' '.join(cmd)}")
 
