@@ -59,55 +59,62 @@ except Exception:
 # =========================================================
 # Paths / CSV helpers
 # =========================================================
+def _get_output_dir(config: Dict) -> str:
+    """Return the directory used for CSV/log outputs.
+
+    This is the single place controlling where the FD round CSV files and AURC
+    CSV files are saved. ``output_dir`` is the explicit, user-facing setting;
+    ``artifact_dir`` is kept as a backward-compatible alias for older override
+    files.
+    """
+    log_cfg = config.get("logging_config", {})
+    output_dir = (
+        log_cfg.get("output_dir")
+        or log_cfg.get("artifact_dir")
+        or log_cfg.get("log_dir", "./logs")
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
 def _get_metrics_csv_path(config: Dict) -> str:
     log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
+    log_dir = _get_output_dir(config)
     exp_name = log_cfg.get("exp_name", "debug_run")
-    os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f"{exp_name}_metrics_rounds.csv")
 
 
 def _get_stealth_csv_path(config: Dict) -> str:
     log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
+    log_dir = _get_output_dir(config)
     exp_name = log_cfg.get("exp_name", "debug_run")
-    os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f"{exp_name}_stealth_rounds.csv")
 
 
 def _get_client_overhead_csv_path(config: Dict) -> str:
     log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
+    log_dir = _get_output_dir(config)
     exp_name = log_cfg.get("exp_name", "debug_run")
-    os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f"{exp_name}_client_overhead_rounds.csv")
 
 
 def _get_aurc_client_scores_csv_path(config: Dict) -> str:
-    log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
-    os.makedirs(log_dir, exist_ok=True)
+    log_dir = _get_output_dir(config)
     return os.path.join(log_dir, "aurc_client_scores.csv")
 
 
 def _get_aurc_rc_points_csv_path(config: Dict) -> str:
-    log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
-    os.makedirs(log_dir, exist_ok=True)
+    log_dir = _get_output_dir(config)
     return os.path.join(log_dir, "aurc_risk_coverage_points.csv")
 
 
 def _get_aurc_per_round_csv_path(config: Dict) -> str:
-    log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
-    os.makedirs(log_dir, exist_ok=True)
+    log_dir = _get_output_dir(config)
     return os.path.join(log_dir, "aurc_per_round.csv")
 
 
 def _get_aurc_tail20_curve_csv_path(config: Dict) -> str:
-    log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
-    os.makedirs(log_dir, exist_ok=True)
+    log_dir = _get_output_dir(config)
     return os.path.join(log_dir, "aurc_tail20_curve.csv")
 
 
@@ -117,7 +124,7 @@ def _get_reliability_dir(config: Dict) -> str:
       <log_dir>/<exp_name>/reliability/
     """
     log_cfg = config.get("logging_config", {})
-    log_dir = log_cfg.get("log_dir", "./logs")
+    log_dir = _get_output_dir(config)
     exp_name = log_cfg.get("exp_name", "debug_run")
     out_dir = os.path.join(log_dir, exp_name, "reliability")
     os.makedirs(out_dir, exist_ok=True)

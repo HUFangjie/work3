@@ -20,7 +20,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 # ---------------------- 实验组合配置 ---------------------- #
@@ -55,14 +55,25 @@ def get_main_abs_path() -> str:
     return main_path
 
 
-def write_exp_override_config(base_log_dir: str, exp_prefix: str, exp: Dict) -> str:
+def write_exp_override_config(
+    base_log_dir: str,
+    exp_prefix: str,
+    exp: Dict,
+    output_dir: Optional[str] = None,
+) -> str:
     """Write the minimal override needed for one benchmark experiment.
 
     Important: this deliberately does *not* duplicate data/model/FD hyperparams.
     Those should be configured once in config/base_config.py, which is exactly
     the workflow needed for choosing wrn28_4_tiny vs wrn28_8_tiny.
+
+    The CSV/log files produced by main.py and federated_distillation.py are
+    written to output_dir. If output_dir is not supplied, it defaults to a
+    per-experiment folder under base_log_dir so concurrent GPU runs do not
+    append to the same files.
     """
     exp_name = f"{exp_prefix}_{exp['name']}"
+    run_output_dir = output_dir or os.path.join(base_log_dir, exp_name)
     override: Dict = {
         "attack_config": {
             "enabled": bool(exp.get("attack_enabled", False)),
@@ -73,12 +84,15 @@ def write_exp_override_config(base_log_dir: str, exp_prefix: str, exp: Dict) -> 
             "name": str(exp.get("defense", "none")),
         },
         "logging_config": {
-            "log_dir": base_log_dir,
+            "log_dir": run_output_dir,
+            "output_dir": run_output_dir,
+            "artifact_dir": run_output_dir,
             "exp_name": exp_name,
         },
     }
 
     os.makedirs(base_log_dir, exist_ok=True)
+    os.makedirs(run_output_dir, exist_ok=True)
     path = os.path.join(base_log_dir, f"{exp_name}_override.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(override, f, indent=2, ensure_ascii=False)
@@ -117,7 +131,12 @@ def build_command(
     cmd += ["--defense", exp["defense"]]
     cmd += ["--defense_enabled" if exp["defense_enabled"] else "--defense_disabled"]
 
-    override_path = write_exp_override_config(args.base_log_dir, args.exp_prefix, exp)
+    override_path = write_exp_override_config(
+        args.base_log_dir,
+        args.exp_prefix,
+        exp,
+        output_dir=args.output_dir,
+    )
     cmd += ["--exp_config", override_path]
     return cmd
 
@@ -138,8 +157,17 @@ def main() -> None:
     parser.add_argument("--num_clients", type=int, default=None, help="Optional total-clients override.")
     parser.add_argument("--partition_type", type=str, default=None, help="Optional partition-type override.")
     parser.add_argument("--dirichlet_alpha", type=float, default=None, help="Optional Dirichlet-alpha override.")
-    parser.add_argument("--base_log_dir", type=str, default="runs/bench", help="Directory for generated overrides, command logs, and run logs.")
+    parser.add_argument("--base_log_dir", type=str, default="runs/bench", help="Directory for generated overrides and command logs.")
     parser.add_argument("--exp_prefix", type=str, default="fd_bench", help="Prefix for generated experiment names.")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional exact directory for CSV/log outputs. If omitted, outputs "
+            "are written to <base_log_dir>/<exp_prefix>_<experiment_name>/."
+        ),
+    )
 
     args = parser.parse_args()
     main_abs = get_main_abs_path()
@@ -155,11 +183,18 @@ def main() -> None:
     print(f"Seed override     : {args.seed}")
     print(f"Base log dir      : {args.base_log_dir}")
     print(f"Exp name prefix   : {args.exp_prefix}")
+    print(f"Output dir override: {args.output_dir}")
+    print("Default output dir: <base_log_dir>/<exp_prefix>_<experiment_name>/")
     print("----------------------------------------")
 
     for i, exp in enumerate(EXPERIMENTS):
         print(f"[{i + 1}/{len(EXPERIMENTS)}] Running experiment: {exp['name']}")
         print(f"    Description : {exp['description']}")
+        run_output_dir = args.output_dir or os.path.join(
+            args.base_log_dir,
+            f"{args.exp_prefix}_{exp['name']}",
+        )
+        print(f"    Outputs     : {run_output_dir}")
         cmd = build_command(args, exp, main_abs)
         print(f"    Command     : {' '.join(cmd)}")
 
